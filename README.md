@@ -1,5 +1,7 @@
 # Relay · Agentless Server Manager
 
+> **继续开发请从 [`HANDOFF.md`](HANDOFF.md) 开始。** 它包含当前实现状态、测试服务器、验证证据、下一步顺序和后续交接规范。
+
 Relay 是一个基于 Tauri 2、React 和 Rust 的本地优先 Linux 桌面运维客户端。它通过 SSH、SFTP 与远程标准命令管理多台服务器，远端无需安装 Agent，也不会暴露 Docker API。
 
 > 当前仓库正在按 `docs/ACCEPTANCE.md` 的里程碑清单持续开发。未标记通过的能力不得视为已完成。
@@ -41,7 +43,7 @@ cargo test --all-features
 - React 端只能调用白名单 Tauri commands，不能执行任意 shell。
 - 远程 Docker 通过 SSH 上的 CLI 操作，不开放 `/var/run/docker.sock`。
 
-详见 [安全设计](docs/SECURITY.md) 与 [架构](docs/ARCHITECTURE.md)。
+详见 [安全设计](docs/SECURITY.md)、[架构](docs/ARCHITECTURE.md) 与 [当前实现快照](docs/CURRENT_STATE.md)。
 
 ## 支持的远端系统
 
