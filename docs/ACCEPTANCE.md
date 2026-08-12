@@ -32,7 +32,7 @@
 
 ## Milestone 3 · Overview / Processes / Ports / Services
 
-- [~] Overview 真实探测与 5 秒刷新
+- [~] Overview CPU/RAM/disk/load/network 双采样、身份/网络/平台/运行摘要与 5 秒刷新（真实登录待验证）
 - [x] `ps`、`ss`、systemd fixture 强类型解析测试
 - [~] 统一搜索与 `8080` inspect → SIGTERM/SIGKILL → process/port verify（实现完成，真实登录待验证）
 
@@ -66,7 +66,7 @@
 
 - `cargo fmt --check`：通过
 - `cargo clippy --all-targets --all-features -- -D warnings`：通过
-- `cargo test --all-features`：13 passed
+- `cargo test --all-features`：14 passed
 - `pnpm lint && pnpm typecheck`：通过
 - `pnpm test --run`：7 passed
 - `pnpm build`：通过，Files/Terminal/Operations 按路由拆包

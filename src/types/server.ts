@@ -60,6 +60,13 @@ export interface SystemOverview {
   osVersion: string;
   kernel: string;
   architecture: string;
+  currentUser: string;
+  currentTime: string;
+  timezone: string;
+  primaryIp: string;
+  defaultGateway: string;
+  packageManager: string;
+  systemdRunning: boolean;
   uptimeSeconds: number;
   cpuModel: string;
   logicalCores: number;
@@ -69,6 +76,10 @@ export interface SystemOverview {
   memoryAvailableBytes: number;
   swapTotalBytes: number;
   swapFreeBytes: number;
+  networkRxBytesPerSecond: number;
+  networkTxBytesPerSecond: number;
+  failedServices: number;
+  listeningPorts: number;
   disks: Array<{ mount: string; totalBytes: number; usedBytes: number; usagePercent: number }>;
   docker: { installed: boolean; running: boolean; version: string | null };
   nginx: { installed: boolean; running: boolean; version: string | null };

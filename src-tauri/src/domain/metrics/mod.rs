@@ -14,10 +14,16 @@ printf '__CPU_MODEL__\n'; awk -F: '/model name|Hardware/ {gsub(/^[ \t]+/,"",$2);
 printf '__CORES__\n'; getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1\n'
 printf '__MEMINFO__\n'; cat /proc/meminfo 2>/dev/null || true
 printf '__LOAD__\n'; cat /proc/loadavg 2>/dev/null || true
+printf '__IDENTITY__\n'; printf '%s\n' "$(id -un 2>/dev/null)" "$(date --iso-8601=seconds 2>/dev/null)" "$(date +%Z 2>/dev/null)"
+printf '__NETWORK__\n'; ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}'; ip route show default 2>/dev/null | awk '{print $3; exit}'
+printf '__PLATFORM__\n'; if command -v apt-get >/dev/null; then echo apt; elif command -v dnf >/dev/null; then echo dnf; elif command -v yum >/dev/null; then echo yum; else echo unknown; fi; if command -v systemctl >/dev/null && systemctl is-system-running --quiet 2>/dev/null; then echo running; else echo degraded; fi
 printf '__DF__\n'; df -B1 -P 2>/dev/null || true
 printf '__CPU_A__\n'; head -n1 /proc/stat 2>/dev/null || true
+printf '__NET_A__\n'; cat /proc/net/dev 2>/dev/null || true
 sleep 0.25
 printf '__CPU_B__\n'; head -n1 /proc/stat 2>/dev/null || true
+printf '__NET_B__\n'; cat /proc/net/dev 2>/dev/null || true
+printf '__COUNTS__\n'; systemctl --failed --type=service --no-legend --no-pager 2>/dev/null | wc -l; ss -H -lntu 2>/dev/null | wc -l
 printf '__DOCKER__\n'; if command -v docker >/dev/null 2>&1; then printf 'installed\t'; docker version --format '{{.Server.Version}}' 2>/dev/null || docker --version 2>/dev/null || true; if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet docker 2>/dev/null; then printf 'running\n'; else printf 'stopped\n'; fi; else printf 'missing\n'; fi
 printf '__NGINX__\n'; if command -v nginx >/dev/null 2>&1; then printf 'installed\t'; nginx -v 2>&1 | sed 's#nginx version: nginx/##'; if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then printf 'running\n'; else printf 'stopped\n'; fi; else printf 'missing\n'; fi
 printf '__CAPABILITIES__\n'; for name in systemctl sudo docker nginx ss ip journalctl lsof tar gzip; do if command -v "$name" >/dev/null 2>&1; then printf '%s=1\n' "$name"; else printf '%s=0\n' "$name"; fi; done
@@ -31,6 +37,13 @@ pub struct SystemOverview {
     pub os_version: String,
     pub kernel: String,
     pub architecture: String,
+    pub current_user: String,
+    pub current_time: String,
+    pub timezone: String,
+    pub primary_ip: String,
+    pub default_gateway: String,
+    pub package_manager: String,
+    pub systemd_running: bool,
     pub uptime_seconds: u64,
     pub cpu_model: String,
     pub logical_cores: u32,
@@ -40,6 +53,10 @@ pub struct SystemOverview {
     pub memory_available_bytes: u64,
     pub swap_total_bytes: u64,
     pub swap_free_bytes: u64,
+    pub network_rx_bytes_per_second: u64,
+    pub network_tx_bytes_per_second: u64,
+    pub failed_services: u32,
+    pub listening_ports: u32,
     pub disks: Vec<DiskUsage>,
     pub docker: RuntimeStatus,
     pub nginx: RuntimeStatus,
@@ -87,6 +104,18 @@ pub fn parse_overview(output: &str) -> AppResult<SystemOverview> {
         .take(3)
         .filter_map(|value| value.parse().ok())
         .collect();
+    let identity: Vec<_> = section(&sections, "IDENTITY").lines().collect();
+    let network: Vec<_> = section(&sections, "NETWORK").lines().collect();
+    let platform: Vec<_> = section(&sections, "PLATFORM").lines().collect();
+    let counts: Vec<u32> = section(&sections, "COUNTS")
+        .lines()
+        .filter_map(|value| value.trim().parse().ok())
+        .collect();
+    let (network_rx_bytes_per_second, network_tx_bytes_per_second) = network_delta(
+        section(&sections, "NET_A"),
+        section(&sections, "NET_B"),
+        0.25,
+    );
     Ok(SystemOverview {
         hostname: first_line(section(&sections, "HOSTNAME"))
             .unwrap_or("unknown")
@@ -101,6 +130,15 @@ pub fn parse_overview(output: &str) -> AppResult<SystemOverview> {
             .or_else(|| uname.get(2).copied())
             .unwrap_or("unknown")
             .to_string(),
+        current_user: identity.first().copied().unwrap_or("unknown").to_string(),
+        current_time: identity.get(1).copied().unwrap_or_default().to_string(),
+        timezone: identity.get(2).copied().unwrap_or_default().to_string(),
+        primary_ip: network.first().copied().unwrap_or_default().to_string(),
+        default_gateway: network.get(1).copied().unwrap_or_default().to_string(),
+        package_manager: platform.first().copied().unwrap_or("unknown").to_string(),
+        systemd_running: platform
+            .get(1)
+            .is_some_and(|value| value.trim() == "running"),
         uptime_seconds: first_line(section(&sections, "UPTIME"))
             .and_then(|value| value.parse().ok())
             .unwrap_or(0),
@@ -125,12 +163,44 @@ pub fn parse_overview(output: &str) -> AppResult<SystemOverview> {
             * 1024,
         swap_total_bytes: meminfo.get("SwapTotal").copied().unwrap_or(0) * 1024,
         swap_free_bytes: meminfo.get("SwapFree").copied().unwrap_or(0) * 1024,
+        network_rx_bytes_per_second,
+        network_tx_bytes_per_second,
+        failed_services: *counts.first().unwrap_or(&0),
+        listening_ports: *counts.get(1).unwrap_or(&0),
         disks: parse_df(section(&sections, "DF")),
         docker: parse_runtime(section(&sections, "DOCKER")),
         nginx: parse_runtime(section(&sections, "NGINX")),
         capabilities: parse_capabilities(section(&sections, "CAPABILITIES")),
         sampled_at: chrono::Utc::now().to_rfc3339(),
     })
+}
+
+pub fn network_delta(first: &str, second: &str, seconds: f64) -> (u64, u64) {
+    fn totals(input: &str) -> (u64, u64) {
+        input
+            .lines()
+            .filter_map(|line| {
+                let (interface, values) = line.split_once(':')?;
+                if interface.trim() == "lo" {
+                    return None;
+                }
+                let values: Vec<u64> = values
+                    .split_whitespace()
+                    .filter_map(|value| value.parse().ok())
+                    .collect();
+                Some((*values.first()?, *values.get(8)?))
+            })
+            .fold((0, 0), |total, value| {
+                (total.0 + value.0, total.1 + value.1)
+            })
+    }
+    let first = totals(first);
+    let second = totals(second);
+    let seconds = seconds.max(0.001);
+    (
+        (second.0.saturating_sub(first.0) as f64 / seconds) as u64,
+        (second.1.saturating_sub(first.1) as f64 / seconds) as u64,
+    )
 }
 
 fn split_sections(output: &str) -> HashMap<String, String> {
@@ -264,7 +334,7 @@ fn parse_capabilities(input: &str) -> HashMap<String, bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{cpu_delta, parse_df, parse_key_values, parse_meminfo};
+    use super::{cpu_delta, network_delta, parse_df, parse_key_values, parse_meminfo};
 
     #[test]
     fn parses_os_release_quotes() {
@@ -294,5 +364,12 @@ mod tests {
         let disks = parse_df(include_str!("../../../../fixtures/df-posix.txt"));
         assert_eq!(disks[0].mount, "/");
         assert_eq!(disks[0].usage_percent, 85.0);
+    }
+
+    #[test]
+    fn computes_network_rate_from_two_samples() {
+        let first = "eth0: 1000 0 0 0 0 0 0 0 2000 0 0 0 0 0 0 0\nlo: 9000 0 0 0 0 0 0 0 9000 0 0 0 0 0 0 0";
+        let second = "eth0: 1500 0 0 0 0 0 0 0 3000 0 0 0 0 0 0 0\nlo: 12000 0 0 0 0 0 0 0 12000 0 0 0 0 0 0 0";
+        assert_eq!(network_delta(first, second, 0.5), (1000, 2000));
     }
 }
