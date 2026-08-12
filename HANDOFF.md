@@ -8,7 +8,7 @@
 
 交付分支：`main`，远程仓库 `git@github.com:wingenglan/server-manager.git`。
 
-最近检查点：`17c32e6 feat: add files transfers and runtime operations`（本次交接还会产生一个新 commit）。
+最近代码检查点：`17c32e6 feat: add files transfers and runtime operations`。交接文档提交消息为 `docs: add durable project handoff`；接手时以远程 `main` 的 HEAD 为准。
 
 ## 必读顺序
 
