@@ -8,7 +8,7 @@
 
 交付分支：`main`，远程仓库 `git@github.com:wingenglan/server-manager.git`。
 
-最近代码检查点：0.3.0 提交号将在最终提交后写入本文件。安装包、SHA-256、自动化证据和未完成的真实验收项见 [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) 与 [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md)。
+最近代码检查点：`48eece0 feat: 完成 Relay 0.3.0 运维工作区`。安装包、SHA-256、自动化证据和未完成的真实验收项见 [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) 与 [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md)。
 
 ## 必读顺序
 
