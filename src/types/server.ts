@@ -171,6 +171,103 @@ export interface OperationsSnapshot {
   services: Array<{ name: string; load: string; active: string; sub: string; description: string }>;
 }
 
+export type ShortcutScope = "global" | "server";
+
+export interface ShortcutRecord {
+  id: string;
+  scope: ShortcutScope;
+  serverId: string | null;
+  name: string;
+  commandTemplate: string;
+  description: string;
+  tags: string[];
+  enabled: boolean;
+  builtin: boolean;
+  usageCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveShortcutInput {
+  id?: string;
+  scope: ShortcutScope;
+  serverId?: string;
+  name: string;
+  commandTemplate: string;
+  description: string;
+  tags: string[];
+  enabled: boolean;
+}
+
+export type LogSource = "system" | "systemd" | "nginx-access" | "nginx-error" | "docker" | "docker-compose";
+
+export interface LogQuery {
+  serverId: string;
+  source: LogSource;
+  target?: string;
+  workingDir?: string;
+  service?: string;
+  tail: number;
+  privileged: boolean;
+}
+
+export interface LogSnapshot {
+  source: LogSource;
+  target: string | null;
+  output: string;
+  fetchedAt: string;
+  truncated: boolean;
+}
+
+export interface MetricSample {
+  sampledAt: string;
+  cpuUsagePercent: number | null;
+  memoryUsedBytes: number;
+  memoryTotalBytes: number;
+  loadOne: number;
+  networkRxBytesPerSecond: number;
+  networkTxBytesPerSecond: number;
+  diskUsagePercent: number | null;
+}
+
+export type PersistedTaskStatus = "queued" | "running" | "success" | "failed" | "cancelled" | "interrupted";
+
+export interface TaskRecord {
+  id: string;
+  taskType: string;
+  serverId: string | null;
+  title: string;
+  status: PersistedTaskStatus;
+  progress: number | null;
+  bytesTransferred: number;
+  totalBytes: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  cancelSupported: boolean;
+  retryPayloadJson: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SaveTaskInput {
+  id: string;
+  taskType: string;
+  serverId?: string;
+  title: string;
+  status: PersistedTaskStatus;
+  progress: number | null;
+  bytesTransferred: number;
+  totalBytes: number | null;
+  startedAt: string;
+  finishedAt?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  cancelSupported: boolean;
+  retryPayloadJson?: string | null;
+}
+
 export interface RemoteBinaryPreview {
   path: string;
   mimeType: string;

@@ -29,10 +29,22 @@ import type {
   DiagnosticsExport,
   ServiceDetail,
   ServiceLogs,
+  LogQuery,
+  LogSnapshot,
+  ShortcutRecord,
+  SaveShortcutInput,
+  MetricSample,
+  SaveTaskInput,
+  TaskRecord,
 } from "../types/server";
 
 export const api = {
   listServers: () => invoke<ServerProfile[]>("list_servers"),
+  listShortcuts: (serverId?: string) => invoke<ShortcutRecord[]>("list_shortcuts", { serverId }),
+  saveShortcut: (input: SaveShortcutInput) => invoke<ShortcutRecord>("save_shortcut", { input }),
+  deleteShortcut: (id: string) => invoke<void>("delete_shortcut", { id }),
+  restoreDefaultShortcuts: () => invoke<void>("restore_default_shortcuts"),
+  useShortcut: (id: string) => invoke<void>("use_shortcut", { id }),
   getServer: (serverId: string) => invoke<ServerProfile>("get_server", { serverId }),
   listServerGroups: () => invoke<ServerGroup[]>("list_server_groups"),
   createServerGroup: (name: string) => invoke<ServerGroup>("create_server_group", { name }),
@@ -49,6 +61,10 @@ export const api = {
     invoke<ConnectionSnapshot>("trust_host_key", { challenge }),
   disconnectServer: (serverId: string) => invoke<void>("disconnect_server", { serverId }),
   overview: (serverId: string) => invoke<SystemOverview>("get_system_overview", { serverId }),
+  metricHistory: (serverId: string, since: string) => invoke<MetricSample[]>("get_metric_history", { serverId, since }),
+  saveTask: (input: SaveTaskInput) => invoke<TaskRecord>("save_task", { input }),
+  listTasks: () => invoke<TaskRecord[]>("list_tasks"),
+  clearFinishedTasks: () => invoke<void>("clear_finished_tasks"),
   openTerminal: (
     serverId: string,
     columns: number,
@@ -110,6 +126,12 @@ export const api = {
     invoke<void>("manage_service", { serverId, service, action }),
   serviceDetail: (serverId: string, service: string) => invoke<ServiceDetail>("get_service_detail", { serverId, service }),
   serviceLogs: (serverId: string, service: string, lines = 200) => invoke<ServiceLogs>("get_service_logs", { serverId, service, lines }),
+  getLogs: (query: LogQuery) => invoke<LogSnapshot>("get_logs", { query }),
+  followLogs: (query: LogQuery, taskId: string, onEvent: (event: CommandEvent) => void) => {
+    const channel = new Channel<CommandEvent>();
+    channel.onmessage = onEvent;
+    return invoke<LogSnapshot>("follow_logs", { query, taskId, onEvent: channel });
+  },
   // Server config import/export intentionally has no credential payload.
   exportServers: () => invoke<PublicServerExport>("export_servers"),
   importServers: (values: PublicServerImport[]) => invoke<ServerProfile[]>("import_servers", { values }),

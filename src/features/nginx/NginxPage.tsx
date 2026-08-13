@@ -44,7 +44,7 @@ export function NginxPage() {
 }
 
 /** 复用服务器工作区导航，并标记当前 Nginx 页。 */
-function NginxTabs({ serverId }: { serverId: string }) { return <nav className="workspace-tabs"><NavLink to={`/servers/${serverId}`}>概览</NavLink><NavLink to={`/servers/${serverId}/files`}>文件</NavLink><NavLink to={`/servers/${serverId}/terminal`}>终端</NavLink><NavLink to={`/servers/${serverId}/operations`}>端口与进程</NavLink><NavLink to={`/servers/${serverId}/services`}>服务</NavLink><NavLink to={`/servers/${serverId}/tools`}>工具</NavLink><NavLink className="active" to={`/servers/${serverId}/nginx`}>Nginx</NavLink><NavLink to={`/servers/${serverId}/docker`}>Docker</NavLink></nav>; }
+function NginxTabs({ serverId }: { serverId: string }) { return <nav className="workspace-tabs"><NavLink to={`/servers/${serverId}`}>概览</NavLink><NavLink to={`/servers/${serverId}/files`}>文件</NavLink><NavLink to={`/servers/${serverId}/terminal`}>终端</NavLink><NavLink to={`/servers/${serverId}/operations`}>端口与进程</NavLink><NavLink to={`/servers/${serverId}/services`}>服务</NavLink><NavLink to={`/servers/${serverId}/tools`}>工具</NavLink><NavLink to={`/servers/${serverId}/logs`}>日志</NavLink><NavLink className="active" to={`/servers/${serverId}/nginx`}>Nginx</NavLink><NavLink to={`/servers/${serverId}/docker`}>Docker</NavLink></nav>; }
 
 /** 展示证书路径和私钥配置元数据，不读取私钥文件内容。 */
 function CertificatePanel({ certificates }: { certificates: Array<{ certificatePath: string; privateKeyPath: string | null; sourceFile: string; sourceLine: number; expiresAt: string | null; daysRemaining: number | null }> }) {

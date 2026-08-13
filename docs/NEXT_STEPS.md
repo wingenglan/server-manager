@@ -2,7 +2,17 @@
 
 本文是接手执行顺序，不替代主需求。每完成一个步骤都应先保持项目可编译/可测试，再更新 `ACCEPTANCE.md`。
 
-当前代码事实：Tools/Nginx、PlatformAdapter、Docker extended、Server groups/duplicate、文件冲突策略与 Copy/Move/chmod/symlink、Overview top/mount/capabilities、systemd detail/logs、有限退避重连、ss/lsof 端口回退和 Argon2id+AES-GCM backup、task center、audit、diagnostics 已有 Rust/typed IPC/UI 基础实现；前端与 Rust 本地门禁均通过，Windows x64 MSI/NSIS 安装包已生成。下一步应优先用 Relay UI 验收 Milestone 1–3 基础登录和真实服务器能力。
+当前代码事实：Tools/Nginx、PlatformAdapter、Docker extended、Server groups/duplicate、文件冲突策略与 Copy/Move/chmod/symlink、Overview top/mount/capabilities、systemd detail/logs、有限退避重连、ss/lsof 端口回退和 Argon2id+AES-GCM backup、task center、audit、diagnostics 已有 Rust/typed IPC/UI 基础实现；0.3.0 终端快捷指令、统一日志、监控历史和任务持久化已完成，前端/Rust 本地门禁与 Windows x64 MSI/NSIS 构建均通过。剩余工作以真实服务器 UI 验收、用户环境安装验证和后续跨平台补齐为主。
+
+## 0.3.0 执行顺序（已完成代码与打包，真实验收待用户执行）
+
+1. 文档基线：已同步 HANDOFF、CURRENT_STATE、ARCHITECTURE、SECURITY、ACCEPTANCE 和本文件。
+2. 终端快捷指令：已完成 SQLite/typed IPC、默认指令、全局/服务器覆盖、标签、变量、匹配和 Tab 插入。
+3. 日志中心：已完成 system journal、systemd/Nginx、Docker/Compose、follow、暂停、搜索、下载和最大缓冲。
+4. 监控图表：已完成本地 24 小时/20,000 条滚动采样与 Overview 1h/6h/24h 趋势图。
+5. 任务持久化：已完成 `task_records`、启动中断标记、手动返回原模块重试入口和禁止自动重放。
+6. 真实验收：待用户通过 Relay UI 执行，只读优先，写入限定在 `/tmp/relay-acceptance-*` 和隔离 Docker 资源，并回填证据。
+7. 版本 0.3.0：MSI/NSIS 已生成，release smoke launch 已通过；覆盖升级、安装后启动和卸载待用户环境验证。
 
 ## P0 — 接手与真实基础链路（必须先做）
 
@@ -14,7 +24,7 @@
 - 运行 `pnpm tauri dev`，确认空状态/设置/add dialog 正常。
 - 查看 GitHub Actions 首轮 Windows/macOS CI；修复平台差异。
 
-完成条件：本地全量门禁与 CI 均绿；把确切版本和结果写入 `CURRENT_STATE.md`。
+完成条件：本地全量门禁与 Tauri release build 均绿；确切版本、产物和结果已写入 `CURRENT_STATE.md`。CI 仍需 push 后观察。
 
 ### 2. 用 Relay UI 验证测试服务器
 
@@ -100,7 +110,7 @@
 
 - 跑 A–K acceptance；Ubuntu password + Rocky/Alma private key target 都需要证据（当前只提供 Ubuntu-like test server）。
 - Windows/macOS build；Windows x64 MSI/NSIS 已完成，macOS 仍待 CI/目标机验证；代码不得硬编码 Windows-only 路径。
-- Windows `pnpm tauri build` 已完成，路径、size、SHA-256 已记录在 `docs/CURRENT_STATE.md`；后续只需补 macOS 包。
+- Windows `pnpm tauri build` 已完成，0.3.0 路径、size、SHA-256 已记录在 `docs/CURRENT_STATE.md`；后续只需补用户环境安装验收和 macOS 包。
 - 更新 README screenshots、support matrix、known limitations 与 release notes。
 
 ## 每个切片的固定质量门

@@ -14,6 +14,7 @@ const OperationsPage = lazy(() => import("./features/operations/OperationsPage")
 const ToolsPage = lazy(() => import("./features/tools/ToolsPage").then((module) => ({ default: module.ToolsPage })));
 const NginxPage = lazy(() => import("./features/nginx/NginxPage").then((module) => ({ default: module.NginxPage })));
 const DockerPage = lazy(() => import("./features/docker/DockerPage").then((module) => ({ default: module.DockerPage })));
+const LogsPage = lazy(() => import("./features/logs/LogsPage").then((module) => ({ default: module.LogsPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,6 +38,7 @@ export default function App() {
             <Route path="servers/:serverId/tools" element={<Suspense fallback={<div className="page-state">正在载入工具中心…</div>}><ToolsPage /></Suspense>} />
             <Route path="servers/:serverId/nginx" element={<Suspense fallback={<div className="page-state">正在载入 Nginx…</div>}><NginxPage /></Suspense>} />
             <Route path="servers/:serverId/docker" element={<Suspense fallback={<div className="page-state">正在载入 Docker…</div>}><DockerPage /></Suspense>} />
+            <Route path="servers/:serverId/logs" element={<Suspense fallback={<div className="page-state">正在载入日志中心…</div>}><LogsPage /></Suspense>} />
             <Route path="settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

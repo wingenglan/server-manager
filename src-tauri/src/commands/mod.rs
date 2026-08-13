@@ -2,8 +2,10 @@ use crate::app::AppState;
 use crate::domain::files::{DirectoryListing, RemoteTextFile, SaveTextInput};
 use crate::domain::metrics::SystemOverview;
 use crate::domain::server::{SaveServerInput, ServerProfile};
+use crate::domain::shortcuts::{SaveShortcutInput, ShortcutRecord};
 use crate::domain::ssh::{ConnectOutcome, ConnectionSnapshot, TrustHostKeyInput};
 use crate::errors::AppResult;
+use crate::infra::local::{MetricSample, SaveTaskInput, TaskRecord};
 use tauri::{ipc::Channel, State};
 
 /// 尽力写入本地审计记录；审计失败不会掩盖已经完成的远端动作，但会写入应用日志。
@@ -73,6 +75,42 @@ async fn audit_outcome<T>(
 #[tauri::command]
 pub async fn list_servers(state: State<'_, AppState>) -> AppResult<Vec<ServerProfile>> {
     state.servers.list().await
+}
+
+/// Lists enabled global shortcuts plus enabled server-specific overrides for terminal completion.
+#[tauri::command]
+pub async fn list_shortcuts(
+    server_id: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<ShortcutRecord>> {
+    state.local.list_shortcuts(server_id.as_deref()).await
+}
+
+/// Creates or updates a local terminal shortcut without sending anything to a remote server.
+#[tauri::command]
+pub async fn save_shortcut(
+    input: SaveShortcutInput,
+    state: State<'_, AppState>,
+) -> AppResult<ShortcutRecord> {
+    state.local.save_shortcut(input).await
+}
+
+/// Deletes a local terminal shortcut; built-ins can later be restored from the defaults action.
+#[tauri::command]
+pub async fn delete_shortcut(id: String, state: State<'_, AppState>) -> AppResult<()> {
+    state.local.delete_shortcut(&id).await
+}
+
+/// Restores missing built-in terminal shortcuts without overwriting user edits.
+#[tauri::command]
+pub async fn restore_default_shortcuts(state: State<'_, AppState>) -> AppResult<()> {
+    state.local.restore_default_shortcuts().await
+}
+
+/// Records one local shortcut insertion for usage-based completion ranking.
+#[tauri::command]
+pub async fn use_shortcut(id: String, state: State<'_, AppState>) -> AppResult<()> {
+    state.local.use_shortcut(&id).await
 }
 
 #[tauri::command]
@@ -343,7 +381,45 @@ pub async fn get_system_overview(
     server_id: String,
     state: State<'_, AppState>,
 ) -> AppResult<SystemOverview> {
-    crate::domain::metrics::probe(&state.ssh, &server_id).await
+    let overview = crate::domain::metrics::probe(&state.ssh, &server_id).await?;
+    if let Err(error) = state.local.record_metric(&server_id, &overview).await {
+        tracing::warn!(error = %error, server_id, "写入本地监控采样失败");
+    }
+    Ok(overview)
+}
+
+/// Returns bounded local monitoring history for one server after an RFC3339 timestamp.
+#[tauri::command]
+pub async fn get_metric_history(
+    server_id: String,
+    since: String,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<MetricSample>> {
+    let since = chrono::DateTime::parse_from_rfc3339(&since)
+        .map_err(|error| {
+            crate::errors::AppError::new("VALIDATION_FAILED", "metrics", "监控历史起始时间无效")
+                .details(error)
+        })?
+        .with_timezone(&chrono::Utc);
+    state.local.metric_history(&server_id, since, 500).await
+}
+
+/// Saves a non-sensitive task state transition in the local task ledger.
+#[tauri::command]
+pub async fn save_task(input: SaveTaskInput, state: State<'_, AppState>) -> AppResult<TaskRecord> {
+    state.local.save_task(input).await
+}
+
+/// Lists recent persisted tasks for task-center hydration after application startup.
+#[tauri::command]
+pub async fn list_tasks(state: State<'_, AppState>) -> AppResult<Vec<TaskRecord>> {
+    state.local.list_tasks(500).await
+}
+
+/// Removes successful, failed, and cancelled task metadata while retaining interruption history.
+#[tauri::command]
+pub async fn clear_finished_tasks(state: State<'_, AppState>) -> AppResult<()> {
+    state.local.clear_finished_tasks().await
 }
 
 #[tauri::command]
@@ -716,6 +792,26 @@ pub async fn get_service_logs(
     state: State<'_, AppState>,
 ) -> AppResult<crate::domain::operations::ServiceLogs> {
     crate::domain::operations::service_logs(&state.ssh, &server_id, &service, lines).await
+}
+
+/// Reads a bounded supported log source without persisting the remote log content locally.
+#[tauri::command]
+pub async fn get_logs(
+    query: crate::domain::logs::LogQuery,
+    state: State<'_, AppState>,
+) -> AppResult<crate::domain::logs::LogSnapshot> {
+    crate::domain::logs::read(&state.ssh, &query).await
+}
+
+/// Follows a supported log source through a cancellable SSH task and Tauri Channel.
+#[tauri::command]
+pub async fn follow_logs(
+    query: crate::domain::logs::LogQuery,
+    task_id: String,
+    on_event: Channel<crate::domain::ssh::CommandEvent>,
+    state: State<'_, AppState>,
+) -> AppResult<crate::domain::logs::LogSnapshot> {
+    crate::domain::logs::follow(&state.ssh, &query, &task_id, &on_event).await
 }
 
 /// 导出不含 secret 的服务器档案配置。

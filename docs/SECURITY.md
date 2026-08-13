@@ -27,6 +27,15 @@
 
 日志过滤器对 password/passphrase/token/authorization/private key 等模式做统一 redaction。诊断导出仅含版本、能力、结构化错误和脱敏环境，不含命令 stdin、终端输入或远程敏感文件内容。
 
+## 快捷指令、远程日志与任务记录
+
+- 快捷指令只插入终端，不因匹配或 Tab 操作自动执行；带参数的命令必须先完成变量填写。
+- 快捷指令、任务记录和审计事件不得保存密码、私钥、sudo 凭据、完整终端输入或命令输出；界面提示用户使用变量代替敏感值。
+- 远程日志只按 tail/follow 流式读取，前端使用固定行数/字节上限，不默认把日志内容写入 SQLite。
+- 日志来源使用固定命令和参数校验：Nginx 仅允许固定 access/error 路径，systemd/Docker/Compose 目标拒绝 shell 元字符和非法名称；不开放任意远程文件日志。
+- 应用重启后 queued/running 任务只标记为 `interrupted`，任务中心只提供返回原模块的手动入口，不自动重放安装、删除、部署、移动等危险任务。
+- `task_records` 的 `retry_payload_json` 仅允许非敏感重试元数据；不得把密码、私钥、sudo 凭据、完整终端输入、命令输出或 Docker 环境变量写入该字段。
+
 ## WebView
 
 CSP 默认拒绝远程脚本与页面。当前主窗口 capability 只开启 Tauri core；前端没有系统浏览器、任意本地 shell、文件系统或数据库权限。需要外链时将按 URL scope 单独增加 opener 权限。

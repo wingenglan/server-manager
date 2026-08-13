@@ -448,6 +448,10 @@ html, body, #root { color: var(--text); background: var(--bg); font-size: 15px; 
 .task-center > header small, .transfer-center > header small { color: var(--muted); font-size: 11px; }
 .task-row strong, .transfer-list strong { font-size: 13px; }
 .task-row small, .transfer-list small { color: var(--muted); font-size: 11px; }
+.task-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 72%, transparent); }
+.task-filters label { display: grid; gap: 4px; min-width: 0; }
+.task-filters label span { color: var(--muted); font-size: 10px; }
+.task-filters select { width: 100%; min-width: 0; padding: 6px 8px; color: var(--text); border: 1px solid var(--line); border-radius: 6px; background: var(--panel); font-size: 11px; }
 
 @media (max-width: 1200px) {
   .docker-container-main { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) minmax(180px, 1fr); }
@@ -488,6 +492,60 @@ html, body, #root { color: var(--text); background: var(--bg); font-size: 15px; 
   .docker-log-toolbar { flex-wrap: wrap; }
   .docker-log-toolbar > label:first-child { flex-basis: 100%; }
 }
+
+.shortcut-overlay { position: fixed; z-index: 140; inset: 0; display: grid; place-items: center; padding: 24px; background: color-mix(in srgb, var(--bg) 76%, transparent); backdrop-filter: blur(9px); }
+.shortcut-manager { width: min(1120px, 100%); max-height: min(820px, calc(100vh - 44px)); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--hover-border); border-radius: 16px; background: var(--panel); box-shadow: var(--shadow-strong); }
+.shortcut-manager__header { display: flex; justify-content: space-between; gap: 20px; padding: 24px 28px 20px; border-bottom: 1px solid var(--line); }
+.shortcut-manager__header .section-kicker { display: inline-flex; align-items: center; gap: 7px; color: var(--accent); }
+.shortcut-manager__header h2 { margin: 8px 0 0; color: var(--text-strong); font-size: 25px; }
+.shortcut-manager__header p { margin: 7px 0 0; color: var(--text-soft); font-size: 12px; }
+.shortcut-manager__body { min-height: 0; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr); overflow: auto; }
+.shortcut-library { min-width: 0; padding: 18px 20px 20px; border-right: 1px solid var(--line); }
+.shortcut-toolbar { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.shortcut-toolbar label { flex: 1; display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 11px; color: var(--accent); border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.shortcut-toolbar input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; font-size: 12px; }
+.shortcut-list { display: grid; gap: 8px; max-height: 560px; overflow: auto; }
+.shortcut-card { display: flex; justify-content: space-between; gap: 12px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); transition: border-color .16s, background .16s, transform .16s; }
+.shortcut-card:hover { border-color: var(--hover-border); background: var(--hover-surface); transform: translateY(-1px); }
+.shortcut-card__main { min-width: 0; }
+.shortcut-card__title { display: flex; align-items: center; gap: 8px; }
+.shortcut-card__title strong { color: var(--text-strong); font-size: 13px; }
+.shortcut-card__title span { padding: 3px 6px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); border-radius: 999px; font-size: 10px; }
+.shortcut-card code { display: block; margin-top: 8px; overflow-wrap: anywhere; color: var(--text); font: 12px/1.45 var(--font-mono); }
+.shortcut-card p { margin: 7px 0 0; color: var(--muted); font-size: 11px; }
+.shortcut-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+.shortcut-tags span { padding: 3px 6px; color: var(--text-soft); background: var(--panel-raised); border-radius: 4px; font-size: 10px; }
+.shortcut-card__actions { display: flex; align-items: flex-start; gap: 4px; }
+.shortcut-card__actions button, .shortcut-restore { display: inline-flex; align-items: center; gap: 6px; padding: 6px; color: var(--muted); border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; }
+.shortcut-card__actions button:hover, .shortcut-restore:hover { color: var(--hover-text); border-color: var(--hover-border); background: var(--hover-surface); }
+.shortcut-card__actions button.is-danger:hover { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
+.shortcut-restore { margin-top: 12px; padding: 7px 9px; color: var(--accent); font-size: 11px; }
+.shortcut-empty { padding: 42px 14px; color: var(--muted); text-align: center; font-size: 12px; }
+.shortcut-form { display: grid; align-content: start; gap: 14px; padding: 20px 22px; }
+.shortcut-form__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 3px; border-bottom: 1px solid var(--line-soft); }
+.shortcut-form__heading span { color: var(--text-strong); font-size: 15px; font-weight: 650; }
+.shortcut-form__heading small, .shortcut-help { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.shortcut-form label:not(.shortcut-check) > span { display: block; margin-bottom: 6px; color: var(--text-soft); font-size: 11px; }
+.shortcut-form input, .shortcut-form textarea, .shortcut-form select { width: 100%; min-height: 38px; padding: 8px 10px; resize: vertical; color: var(--text); border: 1px solid var(--line); outline: 0; border-radius: 8px; background: var(--surface); font-size: 12px; }
+.shortcut-form textarea { min-height: 82px; font-family: var(--font-mono); }
+.shortcut-form input:focus, .shortcut-form textarea:focus, .shortcut-form select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+.shortcut-form select { height: 38px; }
+.shortcut-check { display: flex; align-items: center; gap: 8px; color: var(--text-soft); font-size: 11px; }
+.shortcut-check input { width: 15px; min-height: 15px; accent-color: var(--accent); }
+.terminal-shortcut-popover { position: absolute; z-index: 8; left: 18px; right: 18px; bottom: 22px; display: grid; gap: 2px; max-height: 260px; overflow: auto; padding: 6px; border: 1px solid var(--hover-border); border-radius: 10px; background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: var(--shadow-strong); backdrop-filter: blur(10px); }
+.terminal-shortcut-popover button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; padding: 9px 11px; color: var(--text); border: 0; border-radius: 7px; background: transparent; text-align: left; cursor: pointer; }
+.terminal-shortcut-popover button:hover, .terminal-shortcut-popover button.is-selected { color: var(--hover-text); background: var(--hover-surface); }
+.terminal-shortcut-popover strong, .terminal-shortcut-popover code, .terminal-shortcut-popover small { display: block; }
+.terminal-shortcut-popover strong { font-size: 12px; }
+.terminal-shortcut-popover code { margin-top: 4px; overflow: hidden; color: var(--text-soft); font: 11px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.terminal-shortcut-popover small { align-self: center; color: var(--muted); font-size: 11px; }
+.terminal-variable-popover { position: absolute; z-index: 9; left: 50%; top: 50%; width: min(380px, calc(100% - 32px)); display: grid; gap: 12px; padding: 18px; border: 1px solid var(--hover-border); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-strong); transform: translate(-50%, -50%); }
+.terminal-variable-popover > div:first-child { display: flex; align-items: center; justify-content: space-between; color: var(--text-strong); }
+.terminal-variable-popover > div:first-child button { display: grid; padding: 4px; color: var(--muted); border: 0; background: transparent; cursor: pointer; }
+.terminal-variable-popover label span { display: block; margin-bottom: 5px; color: var(--text-soft); font-size: 11px; }
+.terminal-variable-popover input { width: 100%; height: 36px; padding: 0 9px; color: var(--text); border: 1px solid var(--line); border-radius: 7px; outline: 0; background: var(--surface); font: 12px var(--font-mono); }
+.terminal-variable-popover input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+@media (max-width: 820px) { .shortcut-manager__body { grid-template-columns: 1fr; }.shortcut-library { border-right: 0; border-bottom: 1px solid var(--line); }.shortcut-list { max-height: 310px; } }
 
 /* 文件页增强：书签条、列表与右侧预览组成一个稳定的双栏工作区。 */
 .file-bookmarks-bar { display: flex; align-items: center; gap: 7px; min-height: 46px; padding: 7px 26px; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--panel); scrollbar-width: thin; }
@@ -555,6 +613,42 @@ html, body, #root { color: var(--text); background: var(--bg); font-size: 15px; 
 @media (max-width: 900px) {
   .file-preview-panel { flex-basis: min(320px, 38%); min-width: 240px; }
 }
+
+/* Log workspace: keep the dense stream readable while reusing the active theme surface tokens. */
+.logs-page { min-height: 100%; padding-bottom: 30px; }
+.logs-state { display: inline-flex; align-items: center; gap: 8px; color: var(--text-soft); font-size: 12px; }
+.logs-state i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.logs-state.is-live { color: var(--accent); }
+.logs-state.is-live i { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent); }
+.logs-toolbar, .logs-filterbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 16px 32px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.logs-toolbar label, .logs-filterbar > label:first-child { display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; color: var(--text-soft); background: var(--surface); }
+.logs-toolbar label input, .logs-toolbar label select, .logs-filterbar label input { min-width: 110px; border: 0; outline: 0; color: var(--text); background: transparent; }
+.logs-toolbar label input { width: 145px; }
+.logs-label { color: var(--text-soft); font-size: 12px; }
+.logs-filterbar { padding-top: 11px; padding-bottom: 11px; background: var(--surface); }
+.logs-filterbar > label:first-child { flex: 1; min-width: 210px; }
+.logs-filterbar > label:first-child input { width: 100%; }
+.logs-check { display: inline-flex; align-items: center; gap: 6px; color: var(--text-soft); font-size: 12px; }
+.logs-state-panel { display: flex; align-items: center; gap: 12px; margin: 18px 32px 0; padding: 13px 15px; border: 1px solid var(--line); border-radius: 10px; color: var(--text-soft); background: var(--panel); }
+.logs-state-panel strong { color: var(--danger); }
+.logs-state-panel span { flex: 1; }
+.logs-meta { display: flex; justify-content: space-between; padding: 14px 32px 8px; color: var(--text-soft); font-size: 12px; }
+.logs-output { min-height: 430px; max-height: calc(100vh - 350px); margin: 0 32px; padding: 18px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; color: var(--text); background: var(--surface); font: 12px/1.7 var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+@media (max-width: 900px) { .logs-toolbar, .logs-filterbar { padding-left: 16px; padding-right: 16px; } .logs-state-panel, .logs-meta { margin-left: 16px; margin-right: 16px; } .logs-meta { padding-left: 0; padding-right: 0; } .logs-output { margin-left: 16px; margin-right: 16px; } }
+
+.metric-history { grid-column: 1 / -1; margin-top: 2px; padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-soft); }
+.metric-history > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 16px; }
+.metric-history h2 { margin: 4px 0 3px; color: var(--text-strong); font-size: 18px; }
+.metric-history p { margin: 0; color: var(--text-soft); font-size: 12px; }
+.metric-history__range { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.metric-history__range button { padding: 6px 10px; color: var(--text-soft); border: 0; border-radius: 5px; background: transparent; cursor: pointer; font-size: 12px; }
+.metric-history__range button:hover, .metric-history__range button.active { color: var(--hover-text); background: var(--hover-surface); }
+.metric-chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.metric-chart-grid > div { min-width: 0; min-height: 230px; padding: 8px 9px; border: 1px solid var(--line-soft); border-radius: 9px; background: var(--surface); }
+.metric-history__empty { display: grid; justify-items: center; gap: 8px; min-height: 180px; padding: 45px 15px; color: var(--muted); text-align: center; }
+.metric-history__empty strong { color: var(--text-strong); font-size: 14px; }
+.metric-history__empty span { font-size: 12px; }
+@media (max-width: 680px) { .metric-history { padding: 16px; } .metric-history > header { flex-direction: column; } .metric-chart-grid { grid-template-columns: 1fr; } }
 
 @media (max-width: 680px) {
   .file-bookmarks-bar { padding-left: 16px; padding-right: 16px; }

@@ -32,6 +32,10 @@ export function AppShell() {
   useEffect(() => { applyLocale(readLocale()); }, []);
 
   useEffect(() => {
+    void api.listTasks().then((records) => useCommandTaskStore.getState().hydrate(records)).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -85,7 +89,7 @@ export function AppShell() {
       <footer className="statusbar">
         <span><i className="statusbar__dot" /> 本机服务就绪</span>
         <button className="statusbar-transfer" onClick={() => setTasksOpen(true)}><Waypoints size={11} /> 任务 {activeTasks} · 共 {transferTasks.length + commandTasks.length}</button>
-        <span>Relay 0.2.3</span>
+        <span>Relay 0.3.0</span>
       </footer>
 
       <ServerDialog key={addOpen ? "add-open" : "add-closed"} open={addOpen} onOpenChange={setAddOpen} />
@@ -106,11 +110,11 @@ export function AppShell() {
 /** 将命令面板输入解析为真实的服务器工作区导航命令。 */
 function PaletteResults({ query, servers, onNavigate }: { query: string; servers: ServerProfile[]; onNavigate: (path: string) => void }) {
   const input = query.trim().toLocaleLowerCase();
-  const mode = input === "nginx" || input.startsWith("nginx ") || input === "反向代理" || input.startsWith("反向代理 ") ? "nginx" : input === "docker" || input.startsWith("docker ") || input === "容器" || input.startsWith("容器 ") ? "docker" : input === "tools" || input.startsWith("tools ") || input === "工具" || input.startsWith("工具 ") ? "tools" : input === "terminal" || input.startsWith("terminal ") || input === "终端" || input.startsWith("终端 ") ? "terminal" : input.startsWith("open files ") || input.startsWith("打开文件 ") ? "files" : input === "port" || input.startsWith("operations ") || input.startsWith("ports ") || input.startsWith("processes ") || input.startsWith("services ") || input.startsWith("port ") || input === "端口" || input.startsWith("端口 ") || input === "进程" || input.startsWith("进程 ") ? "operations" : "overview";
-  const needle = input.replace(/^(open files|打开文件|terminal|终端|nginx|反向代理|tools|工具|docker|容器|operations|ports|processes|services|port|端口|进程)\s+/, "");
+  const mode = input === "nginx" || input.startsWith("nginx ") || input === "反向代理" || input.startsWith("反向代理 ") ? "nginx" : input === "docker" || input.startsWith("docker ") || input === "容器" || input.startsWith("容器 ") ? "docker" : input === "tools" || input.startsWith("tools ") || input === "工具" || input.startsWith("工具 ") ? "tools" : input === "terminal" || input.startsWith("terminal ") || input === "终端" || input.startsWith("终端 ") ? "terminal" : input === "logs" || input.startsWith("logs ") || input === "日志" || input.startsWith("日志 ") ? "logs" : input.startsWith("open files ") || input.startsWith("打开文件 ") ? "files" : input === "port" || input.startsWith("operations ") || input.startsWith("ports ") || input.startsWith("processes ") || input.startsWith("services ") || input.startsWith("port ") || input === "端口" || input.startsWith("端口 ") || input === "进程" || input.startsWith("进程 ") ? "operations" : "overview";
+  const needle = input.replace(/^(open files|打开文件|terminal|终端|nginx|反向代理|tools|工具|docker|容器|logs|日志|operations|ports|processes|services|port|端口|进程)\s+/, "");
   const matches = servers.filter((server) => `${server.name} ${server.host} ${server.username}`.toLocaleLowerCase().includes(needle));
   if (!matches.length) return <div className="palette__hint">没有匹配的服务器。端口、进程和服务搜索请在对应服务器工作区中执行。</div>;
-  return <div className="palette-results">{matches.slice(0, 8).map((server) => <button key={server.id} onClick={() => onNavigate(`/servers/${server.id}${mode === "overview" ? "" : `/${mode}`}`)}><span><strong>{mode === "overview" ? "打开概览" : `打开${mode === "files" ? "文件" : mode === "terminal" ? "终端" : mode === "nginx" ? "Nginx" : mode === "tools" ? "工具" : mode === "docker" ? "Docker" : "端口与进程"}`}</strong><small>{server.name} · {server.host}</small></span><ChevronRight size={14} /></button>)}</div>;
+  return <div className="palette-results">{matches.slice(0, 8).map((server) => <button key={server.id} onClick={() => onNavigate(`/servers/${server.id}${mode === "overview" ? "" : `/${mode}`}`)}><span><strong>{mode === "overview" ? "打开概览" : `打开${mode === "files" ? "文件" : mode === "terminal" ? "终端" : mode === "nginx" ? "Nginx" : mode === "tools" ? "工具" : mode === "docker" ? "Docker" : mode === "logs" ? "日志" : "端口与进程"}`}</strong><small>{server.name} · {server.host}</small></span><ChevronRight size={14} /></button>)}</div>;
 }
 
 /** 显示服务器档案，并读取本地 SSH 会话快照更新在线/错误状态。 */

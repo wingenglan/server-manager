@@ -1,6 +1,7 @@
 use crate::domain::ssh::SshConnectionManager;
 use crate::errors::{AppError, AppResult};
 use crate::infra::db::ServerRepository;
+use crate::infra::local::LocalRepository;
 use crate::security::{CredentialStore, OsCredentialStore};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::sync::Arc;
@@ -10,6 +11,7 @@ pub struct AppState {
     pub servers: ServerRepository,
     pub ssh: SshConnectionManager,
     pub transfers: crate::domain::transfer::TransferManager,
+    pub local: LocalRepository,
 }
 
 impl AppState {
@@ -36,6 +38,8 @@ impl AppState {
             .run(&pool)
             .await
             .map_err(AppError::database)?;
+        let local = LocalRepository::new(pool.clone());
+        local.initialize_workspace().await?;
         let credentials: Arc<dyn CredentialStore> =
             Arc::new(OsCredentialStore::new("com.agentless.servermanager"));
         let servers = ServerRepository::new(pool, credentials);
@@ -44,6 +48,7 @@ impl AppState {
             servers,
             ssh,
             transfers: crate::domain::transfer::TransferManager::default(),
+            local,
         })
     }
 }

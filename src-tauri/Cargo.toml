@@ -1,6 +1,6 @@
 [package]
 name = "agentless-server-manager"
-version = "0.2.3"
+version = "0.3.0"
 description = "Local-first agentless Linux server operations desktop client"
 authors = ["Relay contributors"]
 edition = "2021"

@@ -16,7 +16,7 @@ Remote Linux
 
 ## 本地数据
 
-SQLite 使用编译期迁移创建 `servers`、`server_groups`、`tags`、`server_tags`、`known_hosts`、`recent_paths`、`app_settings` 和 `audit_events`。数据库不保存 secret，secret 列只含随机 reference id。
+SQLite 使用编译期迁移创建 `servers`、`server_groups`、`tags`、`server_tags`、`known_hosts`、`recent_paths`、`app_settings`、`audit_events`，以及 0.3.0 的 `command_shortcuts`、`metric_samples`、`task_records`。数据库不保存 SSH/sudo secret、终端输入、远程命令输出或远程日志内容；服务器凭据列只含随机 reference id，任务表只保存脱敏元数据。
 
 ## SSH 生命周期
 
@@ -28,6 +28,19 @@ React 不传裸 shell。各 domain service 构建固定 program 与经过 POSIX 
 
 ## 前端
 
-前端按 feature 切分，TanStack Query 管理远端状态，Zustand 仅管理 UI session，Radix 提供可访问交互原语。列表达到大数据量时使用 TanStack Virtual；终端和日志使用 Tauri Channel/Event 流式传输。
+前端按 feature 切分，TanStack Query 管理远端状态，Zustand 管理短期 UI session，SQLite 通过 typed IPC 提供快捷指令、指标历史和任务记录，Radix 提供可访问交互原语。列表达到大数据量时使用 TanStack Virtual；终端和日志使用 Tauri Channel/Event 流式传输。
 
 Tools、Nginx 和 Docker 当前也遵循同一 Rust boundary：工具 registry 生成固定包管理命令，Nginx parser 消费 `nginx -T` 并只返回结构化 proxy/source mapping，前端不接触裸 shell 或 Docker socket；Docker 通过 SSH 执行远程 CLI 的 JSON 输出。
+
+## 0.3.0 新增边界
+
+- 快捷指令只负责本地匹配、参数收集和安全插入终端，不负责自动执行；Enter 和危险操作确认仍由终端/现有 privileged runner 处理。
+- 日志中心由统一 `LogQuery`/`LogSnapshot`/流式事件 IPC 聚合 system journal、systemd、固定 Nginx access/error 路径和 Docker/Compose 适配器；follow 使用可取消 Channel、30 秒服务端上限和有界前端缓冲，不提供任意远程文件日志。
+- Overview 采样成功后写入本地短期 `metric_samples`，不会改变远程服务器，也不引入常驻 Agent。
+- 所有远程命令/流式长任务通过 `task_records` 保存状态、进度和可安全重试元数据；应用启动时只将 queued/running 标记为 `interrupted`，任务中心只导航回原模块供用户手动确认，禁止自动重放。
+
+## 本地短期数据边界
+
+- `metric_samples` 只保存 CPU、内存、load、网络速率、磁盘使用率和采样时间，按 24 小时与每服务器 20,000 条滚动清理。
+- `task_records` 不保存密码、私钥、sudo 凭据、终端输入、命令输出或 Docker 敏感环境变量；错误文本经过截断和脱敏。
+- 快捷指令模板与日志来源/目标属于本地配置和查询元数据；日志正文仅在内存中按固定行数和字节数展示。

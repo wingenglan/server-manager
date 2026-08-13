@@ -2,12 +2,15 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { Terminal } from "@xterm/xterm";
 import { useQuery } from "@tanstack/react-query";
-import { Eraser, Minus, Pencil, Plus, RotateCw, Search, TerminalSquare, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Eraser, Minus, Pencil, Plus, RotateCw, Search, Sparkles, TerminalSquare, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { Button } from "../../components/ui/Button";
 import { api, type TerminalEvent } from "../../lib/api";
 import { errorMessage } from "../../lib/errors";
+import { materializeShortcut, matchShortcuts, shortcutVariables } from "./shortcutMatcher";
+import { ShortcutManager } from "./ShortcutManager";
+import type { ShortcutRecord } from "../../types/server";
 
 interface TerminalTab {
   key: string;
@@ -29,6 +32,7 @@ export function TerminalPage() {
   const { serverId = "" } = useParams();
   const profile = useQuery({ queryKey: ["server", serverId], queryFn: () => api.getServer(serverId) });
   const connection = useQuery({ queryKey: ["connection", serverId], queryFn: () => api.connectionState(serverId), refetchInterval: 3000 });
+  const shortcuts = useQuery({ queryKey: ["shortcuts", serverId], queryFn: () => api.listShortcuts(serverId), enabled: !!serverId });
   const [tabs, setTabs] = useState<TerminalTab[]>(() => [newTab(1)]);
   const [activeKey, setActiveKey] = useState(() => tabs[0].key);
   const [editingKey, setEditingKey] = useState<string | null>(null);
@@ -37,6 +41,7 @@ export function TerminalPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchRequest, setSearchRequest] = useState(0);
   const [clearRequest, setClearRequest] = useState(0);
+  const [shortcutManagerOpen, setShortcutManagerOpen] = useState(false);
 
   const addTab = () => {
     const tab = newTab(tabs.length + 1);
@@ -68,9 +73,9 @@ export function TerminalPage() {
   return <section className="terminal-page">
     <div className="workspace-header terminal-header">
       <div><div className="breadcrumb">服务器 / {profile.data?.name ?? "…"} / <span>终端</span></div><h1>SSH 终端</h1><p>{profile.data ? `${profile.data.username}@${profile.data.host}` : "正在载入"}</p></div>
-      <div className="workspace-header__actions"><span className={`connection-pill ${connection.data?.status === "online" ? "is-online" : ""}`}><i /> {connection.data?.status === "online" ? `${tabs.length} 个交互会话` : "SSH 已断开"}</span></div>
+      <div className="workspace-header__actions"><Button size="sm" onClick={() => setShortcutManagerOpen(true)}><Sparkles size={14} /> 快捷指令</Button><span className={`connection-pill ${connection.data?.status === "online" ? "is-online" : ""}`}><i /> {connection.data?.status === "online" ? `${tabs.length} 个交互会话` : "SSH 已断开"}</span></div>
     </div>
-    <nav className="workspace-tabs"><NavLink end to={`/servers/${serverId}`}>概览</NavLink><NavLink to={`/servers/${serverId}/files`}>文件</NavLink><NavLink className="active" to={`/servers/${serverId}/terminal`}>终端</NavLink><NavLink to={`/servers/${serverId}/operations`}>端口与进程</NavLink><NavLink to={`/servers/${serverId}/services`}>服务</NavLink><NavLink to={`/servers/${serverId}/tools`}>工具</NavLink><NavLink to={`/servers/${serverId}/nginx`}>Nginx</NavLink><NavLink to={`/servers/${serverId}/docker`}>Docker</NavLink></nav>
+    <nav className="workspace-tabs"><NavLink end to={`/servers/${serverId}`}>概览</NavLink><NavLink to={`/servers/${serverId}/files`}>文件</NavLink><NavLink className="active" to={`/servers/${serverId}/terminal`}>终端</NavLink><NavLink to={`/servers/${serverId}/operations`}>端口与进程</NavLink><NavLink to={`/servers/${serverId}/services`}>服务</NavLink><NavLink to={`/servers/${serverId}/tools`}>工具</NavLink><NavLink to={`/servers/${serverId}/logs`}>日志</NavLink><NavLink to={`/servers/${serverId}/nginx`}>Nginx</NavLink><NavLink to={`/servers/${serverId}/docker`}>Docker</NavLink></nav>
     <div className="terminal-workspace">
       <div className="terminal-tabbar">
         <div className="terminal-tabs">
@@ -86,8 +91,9 @@ export function TerminalPage() {
         <div className="terminal-tools"><button title="搜索终端输出" onClick={() => setSearchOpen((value) => !value)}><Search size={14} /></button><button title="清屏" onClick={() => setClearRequest((value) => value + 1)}><Eraser size={14} /></button><button onClick={() => setFontSize((value) => Math.max(9, value - 1))} title="缩小字体"><Minus size={14} /></button><span>{fontSize}px</span><button onClick={() => setFontSize((value) => Math.min(24, value + 1))} title="放大字体"><Plus size={14} /></button></div>
       </div>
       {connection.data?.status !== "online" && <div className="terminal-blocked">服务器连接已断开。<NavLink to={`/servers/${serverId}`}>返回概览重新连接</NavLink></div>}
-      {tabs.map((tab) => <SessionTerminal key={`${tab.key}:${tab.revision}`} serverId={serverId} active={activeKey === tab.key} fontSize={fontSize} searchQuery={searchQuery} searchRequest={activeKey === tab.key ? searchRequest : 0} clearRequest={activeKey === tab.key ? clearRequest : 0} onReconnect={() => reopenTab(tab.key)} />)}
+      {tabs.map((tab) => <SessionTerminal key={`${tab.key}:${tab.revision}`} serverId={serverId} active={activeKey === tab.key} fontSize={fontSize} shortcuts={shortcuts.data ?? []} searchQuery={searchQuery} searchRequest={activeKey === tab.key ? searchRequest : 0} clearRequest={activeKey === tab.key ? clearRequest : 0} onReconnect={() => reopenTab(tab.key)} />)}
     </div>
+    <ShortcutManager serverId={serverId} open={shortcutManagerOpen} onClose={() => { setShortcutManagerOpen(false); void shortcuts.refetch(); }} />
   </section>;
 }
 
@@ -98,10 +104,11 @@ interface SessionProps {
   searchQuery: string;
   searchRequest: number;
   clearRequest: number;
+  shortcuts: ShortcutRecord[];
   onReconnect: () => void;
 }
 
-function SessionTerminal({ serverId, active, fontSize, searchQuery, searchRequest, clearRequest, onReconnect }: SessionProps) {
+function SessionTerminal({ serverId, active, fontSize, shortcuts, searchQuery, searchRequest, clearRequest, onReconnect }: SessionProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -110,6 +117,21 @@ function SessionTerminal({ serverId, active, fontSize, searchQuery, searchReques
   const activeRef = useRef(active);
   const [status, setStatus] = useState<"opening" | "online" | "closed" | "error">("opening");
   const [error, setError] = useState<string | null>(null);
+  const [inputBuffer, setInputBuffer] = useState("");
+  const [selectedSuggestion, setSelectedSuggestion] = useState(0);
+  const [pendingShortcut, setPendingShortcut] = useState<ShortcutRecord | null>(null);
+  const [variableValues, setVariableValues] = useState<Record<string, string>>({});
+  const suggestions = useMemo(() => inputBuffer.trim() ? matchShortcuts(shortcuts, inputBuffer) : [], [inputBuffer, shortcuts]);
+  const suggestionsRef = useRef<ShortcutRecord[]>([]);
+  const selectedSuggestionRef = useRef(0);
+  const inputBufferRef = useRef("");
+  const pendingShortcutRef = useRef<ShortcutRecord | null>(null);
+  useEffect(() => {
+    suggestionsRef.current = suggestions;
+    selectedSuggestionRef.current = selectedSuggestion;
+    inputBufferRef.current = inputBuffer;
+    pendingShortcutRef.current = pendingShortcut;
+  }, [inputBuffer, pendingShortcut, selectedSuggestion, suggestions]);
 
   useEffect(() => {
     activeRef.current = active;
@@ -146,12 +168,60 @@ function SessionTerminal({ serverId, active, fontSize, searchQuery, searchReques
       if (activeRef.current) terminal.focus();
     }).catch((reason) => { if (!disposed) { setStatus("error"); setError(errorMessage(reason)); } });
 
+    const insertShortcut = (shortcut: ShortcutRecord, values: Record<string, string> = {}) => {
+      const command = materializeShortcut(shortcut.commandTemplate, values);
+      if (!command || !terminalIdRef.current) return;
+      void api.writeTerminal(terminalIdRef.current, new TextEncoder().encode("\u0015" + command)).catch((reason) => setError(errorMessage(reason)));
+      setInputBuffer("");
+      setSelectedSuggestion(0);
+      setPendingShortcut(null);
+      setVariableValues({});
+      void api.useShortcut(shortcut.id);
+    };
+    const chooseShortcut = (shortcut: ShortcutRecord) => {
+      const variables = shortcutVariables(shortcut.commandTemplate);
+      if (variables.length) {
+        setVariableValues(Object.fromEntries(variables.map((name) => [name, ""])));
+        setPendingShortcut(shortcut);
+      } else {
+        insertShortcut(shortcut);
+      }
+    };
     const dataDisposable = terminal.onData((data) => {
       if ((data.includes("\n") || data.includes("\r")) && data.length > 2 && !window.confirm("即将粘贴多行内容到远程终端，确定继续吗？")) return;
+      if (data.includes("\n") || data.includes("\r") || data === "\u0003" || data === "\u0015" || data.includes("\u001b")) {
+        inputBufferRef.current = "";
+        setInputBuffer("");
+      } else if (data === "\u007f") {
+        inputBufferRef.current = inputBufferRef.current.slice(0, -1);
+        setInputBuffer(inputBufferRef.current);
+      } else if (data.length && [...data].every((character) => character >= " " && character !== "\u007f")) {
+        inputBufferRef.current += data;
+        setInputBuffer(inputBufferRef.current);
+        setSelectedSuggestion(0);
+      }
       if (terminalIdRef.current) void api.writeTerminal(terminalIdRef.current, new TextEncoder().encode(data)).catch((reason) => setError(errorMessage(reason)));
     });
     terminal.attachCustomKeyEventHandler((event) => {
-      if (event.type !== "keydown" || !event.ctrlKey || !event.shiftKey) return true;
+      if (event.type !== "keydown") return true;
+      if (event.key === "Tab" && suggestionsRef.current[selectedSuggestionRef.current]) {
+        chooseShortcut(suggestionsRef.current[selectedSuggestionRef.current]);
+        return false;
+      }
+      if (event.key === "ArrowDown" && suggestionsRef.current.length) {
+        setSelectedSuggestion((value) => Math.min(value + 1, suggestionsRef.current.length - 1));
+        return false;
+      }
+      if (event.key === "ArrowUp" && suggestionsRef.current.length) {
+        setSelectedSuggestion((value) => Math.max(value - 1, 0));
+        return false;
+      }
+      if (event.key === "Escape" && (suggestionsRef.current.length || pendingShortcutRef.current)) {
+        setSelectedSuggestion(0);
+        setPendingShortcut(null);
+        return false;
+      }
+      if (!event.ctrlKey || !event.shiftKey) return true;
       if (event.key.toLowerCase() === "c" && terminal.hasSelection()) { void navigator.clipboard.writeText(terminal.getSelection()); return false; }
       if (event.key.toLowerCase() === "v") { void navigator.clipboard.readText().then((value) => terminal.paste(value)); return false; }
       return true;
@@ -180,5 +250,17 @@ function SessionTerminal({ serverId, active, fontSize, searchQuery, searchReques
   useEffect(() => { if (searchRequest && searchQuery) searchRef.current?.findNext(searchQuery, { caseSensitive: false, incremental: false }); }, [searchQuery, searchRequest]);
   useEffect(() => { if (clearRequest) terminalRef.current?.clear(); }, [clearRequest]);
 
-  return <div className={`terminal-session ${active ? "is-active" : ""}`}><div ref={hostRef} className="terminal-host" aria-label="SSH 交互终端" />{status === "opening" && <div className="terminal-session-state">正在创建 PTY…</div>}{error && <div className="terminal-error">{error}<Button size="sm" onClick={onReconnect}><RotateCw size={13} /> 重开会话</Button></div>}{status === "closed" && !error && <div className="terminal-error">会话已关闭<Button size="sm" onClick={onReconnect}><RotateCw size={13} /> 重开会话</Button></div>}</div>;
+  const variables = pendingShortcut ? shortcutVariables(pendingShortcut.commandTemplate) : [];
+  const sessionClass = active ? "terminal-session is-active" : "terminal-session";
+  const commitVariableShortcut = (event: FormEvent) => {
+    event.preventDefault();
+    if (!pendingShortcut || !terminalIdRef.current) return;
+    const command = materializeShortcut(pendingShortcut.commandTemplate, variableValues);
+    if (!command) return;
+    void api.writeTerminal(terminalIdRef.current, new TextEncoder().encode("\u0015" + command));
+    void api.useShortcut(pendingShortcut.id);
+    setPendingShortcut(null);
+    setInputBuffer("");
+  };
+  return <div className={sessionClass}><div ref={hostRef} className="terminal-host" aria-label="SSH 交互终端" />{suggestions.length > 0 && <div className="terminal-shortcut-popover" role="listbox" aria-label="快捷指令建议">{suggestions.map((shortcut, index) => <button key={shortcut.id} className={index === selectedSuggestion ? "is-selected" : ""} onMouseDown={(event) => { event.preventDefault(); const names = shortcutVariables(shortcut.commandTemplate); if (names.length) { setVariableValues(Object.fromEntries(names.map((name) => [name, ""]))); setPendingShortcut(shortcut); } else if (terminalIdRef.current) { void api.writeTerminal(terminalIdRef.current, new TextEncoder().encode("\u0015" + shortcut.commandTemplate)); setInputBuffer(""); void api.useShortcut(shortcut.id); } }}><span><strong>{shortcut.name}</strong><code>{shortcut.commandTemplate}</code></span><small>{shortcut.description}</small></button>)}</div>}{pendingShortcut && <form className="terminal-variable-popover" onSubmit={commitVariableShortcut}><div><strong>填写快捷指令参数</strong><button type="button" onClick={() => setPendingShortcut(null)} aria-label="取消"><X size={13} /></button></div>{variables.map((name) => <label key={name}><span>{name}</span><input autoFocus={name === variables[0]} value={variableValues[name] ?? ""} onChange={(event) => setVariableValues((current) => ({ ...current, [name]: event.target.value }))} required /></label>)}<div className="dialog-actions"><Button type="button" onClick={() => setPendingShortcut(null)}>取消</Button><Button type="submit" variant="primary">插入命令</Button></div></form>}{status === "opening" && <div className="terminal-session-state">正在创建 PTY…</div>}{error && <div className="terminal-error">{error}<Button size="sm" onClick={onReconnect}><RotateCw size={13} /> 重开会话</Button></div>}{status === "closed" && !error && <div className="terminal-error">会话已关闭<Button size="sm" onClick={onReconnect}><RotateCw size={13} /> 重开会话</Button></div>}</div>;
 }
