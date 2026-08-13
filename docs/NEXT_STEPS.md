@@ -2,6 +2,8 @@
 
 本文是接手执行顺序，不替代主需求。每完成一个步骤都应先保持项目可编译/可测试，再更新 `ACCEPTANCE.md`。
 
+当前代码事实：Tools/Nginx、PlatformAdapter、Docker extended、Server groups/duplicate、文件冲突策略与 Copy/Move/chmod/symlink、Overview top/mount/capabilities、systemd detail/logs、有限退避重连、ss/lsof 端口回退和 Argon2id+AES-GCM backup、task center、audit、diagnostics 已有 Rust/typed IPC/UI 基础实现；前端与 Rust 本地门禁均通过，Windows x64 MSI/NSIS 安装包已生成。下一步应优先用 Relay UI 验收 Milestone 1–3 基础登录和真实服务器能力。
+
 ## P0 — 接手与真实基础链路（必须先做）
 
 ### 1. 新电脑复现基线
@@ -33,13 +35,13 @@
 
 按优先级：
 
-- connection test、有限退避 reconnect、connection error state；真实 sidebar online/offline。
-- Server groups/search/recent/favorite、duplicate/edit/delete 完整交互。
-- 文件冲突策略（Skip/Replace/Rename/Apply to all）、文件夹选择上传、retry、远端内部 move/copy、chmod、large file viewer。
-- editor Reload/Compare、sudo permission failure UX；测试 destructive confirm 与 file conflict UI。
-- Overview top processes、mount 列表、network sampling 稳定性、warning thresholds。
-- `ss` 权限不足提示 + sudo rescan + fallback；process/service detail 与 logs。
-- command palette 从 placeholder 变成 server/terminal/files/port 的真实 command/filter。
+- connection test、有限退避 reconnect、connection error state 已接入；真实 sidebar online/offline 仍需 Relay UI 证据。
+- Server groups/search/recent/favorite、edit/delete、duplicate 已接入；仍需远端真实证据。
+- 文件冲突策略（Skip/Replace/Rename，当前上传批次 Apply-to-all）、文件夹选择上传、远端内部 Copy/Move、chmod、symlink、Large File Viewer 和失败/取消后重新提交已接入；pause/resume 仍为 P1。
+- sudo permission failure UX；测试 destructive confirm 与 file conflict UI（editor Reload/Compare 已接入）。
+- Overview top processes、mount 摘要、network sampling 已接入；仍需 warning thresholds、virtualization、真实证据。
+- process/service detail、logs、enable/disable、`ss` 权限不足提示、sudo rescan 和 lsof fallback 已接入；仍需真实权限组合证据。
+- command palette 已支持 server/terminal/files/tools/Nginx/Docker/operations 导航；仍需真实 command/filter 证据。
 
 完成条件：Milestone 1–3 的 P0 全部有 UI + backend + errors + tests + real evidence。
 
@@ -47,10 +49,10 @@
 
 ### 4. Tools registry 与安装
 
-- 添加 `PlatformAdapter`/capability model，集中 Ubuntu/Debian 与 RHEL family 差异。
+- 添加 `PlatformAdapter`/capability model，集中 Ubuntu/Debian 与 RHEL family 差异（已完成，需真实目标验证）。
 - registry 至少覆盖 Nginx、Docker、Git、curl/wget、tar/unzip。
 - detection 返回 installed/version/running/permission；不假设命令存在。
-- install 前展示 package manager、exact plan、风险与 sudo 要求；用户确认后 streaming output/cancel/verify。
+- install 前展示 package manager、exact plan、风险与 sudo 要求；用户确认后 streaming output/verify，并支持取消远程 channel；全局 task center 已接入。
 - 不自动升级、不未经点击安装。
 
 ### 5. Nginx 管理
@@ -59,7 +61,7 @@
 - fixtures 覆盖 include、server_name、listen、proxy_pass、upstream、注释、多个 server block。
 - reverse proxy list 显示 host/listen/target/source/status。
 - Wizard 只写独立 managed conf；保存流程 backup → temp/atomic → `nginx -t` → reload → verify；任何失败 rollback。
-- 不把证书 private key 内容拉到前端。
+- HTTPS wizard 会要求证书/私钥路径已存在；证书 expiry 只读取公钥证书元数据，不把 private key 内容拉到前端。
 
 完成条件：主需求 G 在隔离配置上真实通过，错误配置不影响原 Nginx。
 
@@ -68,14 +70,14 @@
 ### 6. Docker Core
 
 - CLI-over-SSH，优先 `--format json`/inspect JSON；不得暴露 daemon TCP/socket。
-- containers list/actions/logs follow/inspect/stats/exec；actions confirm + verify。
+- containers list/actions/logs follow/inspect/stats/exec；actions confirm + verify；follow 为 30 秒有时限并支持取消。
 - images list/pull streaming/run wizard/remove；secret-like env 默认 mask。
 - fixtures 与 parser tests 先行，UI 使用真实数据。
 
 ### 7. Docker Extended
 
 - volumes/networks inspect/create/delete with high-risk confirm。
-- Compose project discovery、services/logs/restart、Monaco yaml、`docker compose config`、apply。
+- Compose project discovery、up/down/restart、services/logs、默认脱敏 Monaco yaml/config、原始 YAML 显式编辑校验/失败恢复、资源候选和逐项 cleanup 已接入；仍需真实验收。
 - cleanup 逐项选择并预览；volume 和 `down -v` 强确认。
 
 完成条件：主需求 H–J 真实通过。
@@ -84,22 +86,21 @@
 
 ### 8. Import/export
 
-- 普通 versioned JSON export 不含 secret。
-- 完整 backup：Argon2id + modern AEAD，保存 KDF params/salt/nonce/ciphertext；wrong password fail。
-- import 后 secret 重新进入 OS Keychain；不得留临时明文。
+- 普通 versioned JSON export/import 与 Argon2id + AES-256-GCM 完整备份已实现；需在 Rust 门禁和真实 UI 通过后补证据。
+- 完整 backup 保存 KDF params/salt/nonce/ciphertext；wrong password fail；import 后 secret 重新进入 OS Keychain，不留持久化明文。
 
 ### 9. Product polish
 
-- settings persistence、dark/light、i18n structure、shortcuts、real notifications/toasts/task center。
-- local audit events（无 secret）、redacted diagnostics export、app log、About/version。
+- settings persistence、dark/light、locale preference structure、shortcuts、cross-page notifications/toasts/task center（toast 与 locale 结构已接入，仍需真实桌面验证和完整翻译资源）。
+- local audit events（无 secret）、redacted diagnostics export、app log、About/version（app log 已写入 Tauri app log 目录，仍需桌面路径验证）。
 - performance：1k/10k lists、50 server probe limits、page visibility pollers、stream cancellation。
 - crash 后不重放 destructive task。
 
 ### 10. Full release
 
 - 跑 A–K acceptance；Ubuntu password + Rocky/Alma private key target 都需要证据（当前只提供 Ubuntu-like test server）。
-- Windows/macOS build；代码不得硬编码 Windows-only 路径。
-- `pnpm tauri build`，记录安装包绝对/仓库相对路径、size、SHA-256。
+- Windows/macOS build；Windows x64 MSI/NSIS 已完成，macOS 仍待 CI/目标机验证；代码不得硬编码 Windows-only 路径。
+- Windows `pnpm tauri build` 已完成，路径、size、SHA-256 已记录在 `docs/CURRENT_STATE.md`；后续只需补 macOS 包。
 - 更新 README screenshots、support matrix、known limitations 与 release notes。
 
 ## 每个切片的固定质量门

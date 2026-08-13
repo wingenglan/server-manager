@@ -7,9 +7,11 @@ use russh::client;
 use russh::keys::ssh_key::{HashAlg, PublicKey};
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, Semaphore};
+use tauri::ipc::Channel;
+use tokio::sync::{mpsc, Notify, Semaphore};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +48,7 @@ pub enum ConnectionStatus {
     Offline,
     Connecting,
     Online,
+    Error,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,26 +75,100 @@ struct ManagedConnection {
     limiter: Arc<Semaphore>,
 }
 
+struct CommandTaskState {
+    cancelled: AtomicBool,
+    notify: Notify,
+}
+
+#[derive(Clone, Default)]
+pub struct CommandTaskManager {
+    tasks: Arc<DashMap<String, Arc<CommandTaskState>>>,
+}
+
+impl CommandTaskManager {
+    /// 注册一个可由 UI 取消的远程流式命令任务。
+    pub fn begin(&self, task_id: &str) -> AppResult<CommandTaskGuard> {
+        if task_id.is_empty() || self.tasks.contains_key(task_id) {
+            return Err(AppError::new(
+                "TASK_ID_INVALID",
+                "task",
+                "任务标识无效或已存在",
+            ));
+        }
+        let state = Arc::new(CommandTaskState {
+            cancelled: AtomicBool::new(false),
+            notify: Notify::new(),
+        });
+        self.tasks.insert(task_id.to_string(), state.clone());
+        Ok(CommandTaskGuard {
+            task_id: task_id.to_string(),
+            state,
+            manager: self.clone(),
+        })
+    }
+
+    /// 标记流式远程任务取消，并唤醒正在等待 SSH 输出的执行器。
+    pub fn cancel(&self, task_id: &str) -> AppResult<()> {
+        let state = self
+            .tasks
+            .get(task_id)
+            .ok_or_else(|| AppError::new("TASK_NOT_FOUND", "task", "远程任务不存在或已结束"))?;
+        state.cancelled.store(true, Ordering::Release);
+        state.notify.notify_one();
+        Ok(())
+    }
+}
+
+pub struct CommandTaskGuard {
+    task_id: String,
+    state: Arc<CommandTaskState>,
+    manager: CommandTaskManager,
+}
+
+impl CommandTaskGuard {
+    /// 返回任务取消状态，使 SSH channel 能在输出等待期间立即退出。
+    fn state(&self) -> Arc<CommandTaskState> {
+        self.state.clone()
+    }
+}
+
+impl Drop for CommandTaskGuard {
+    fn drop(&mut self) {
+        self.manager.tasks.remove(&self.task_id);
+    }
+}
+
 #[derive(Clone)]
 pub struct SshConnectionManager {
     repository: ServerRepository,
     connections: Arc<DashMap<String, Arc<ManagedConnection>>>,
     pending: Arc<DashMap<String, PendingHostKey>>,
     connecting: Arc<DashMap<String, ()>>,
+    errors: Arc<DashMap<String, AppError>>,
     terminals: Arc<DashMap<String, ManagedTerminal>>,
+    tasks: CommandTaskManager,
 }
 
 impl SshConnectionManager {
+    /// 创建进程内 SSH 会话管理器，并为每个服务器保留独立连接、终端和错误状态。
     pub fn new(repository: ServerRepository) -> Self {
         Self {
             repository,
             connections: Arc::new(DashMap::new()),
             pending: Arc::new(DashMap::new()),
             connecting: Arc::new(DashMap::new()),
+            errors: Arc::new(DashMap::new()),
             terminals: Arc::new(DashMap::new()),
+            tasks: CommandTaskManager::default(),
         }
     }
 
+    /// 取消一个由流式安装、拉取或日志任务注册的远程命令。
+    pub fn cancel_task(&self, task_id: &str) -> AppResult<()> {
+        self.tasks.cancel(task_id)
+    }
+
+    /// 返回连接快照，并把最近一次可恢复的连接错误暴露给 UI。
     pub fn snapshot(&self, server_id: &str) -> ConnectionSnapshot {
         let closed = self
             .connections
@@ -100,22 +177,33 @@ impl SshConnectionManager {
             .unwrap_or(false);
         if closed {
             self.connections.remove(server_id);
+            self.errors
+                .entry(server_id.to_string())
+                .or_insert_with(|| connection_lost_error(server_id));
         }
-        let (status, connected_at) = if let Some(connection) = self.connections.get(server_id) {
-            (ConnectionStatus::Online, Some(connection.connected_at))
-        } else if self.connecting.contains_key(server_id) {
-            (ConnectionStatus::Connecting, None)
-        } else {
-            (ConnectionStatus::Offline, None)
-        };
+        let (status, connected_at, error) =
+            if let Some(connection) = self.connections.get(server_id) {
+                (
+                    ConnectionStatus::Online,
+                    Some(connection.connected_at),
+                    None,
+                )
+            } else if self.connecting.contains_key(server_id) {
+                (ConnectionStatus::Connecting, None, None)
+            } else if let Some(error) = self.errors.get(server_id) {
+                (ConnectionStatus::Error, None, Some(error.clone()))
+            } else {
+                (ConnectionStatus::Offline, None, None)
+            };
         ConnectionSnapshot {
             server_id: server_id.to_string(),
             status,
             connected_at,
-            error: None,
+            error,
         }
     }
 
+    /// 建立复用 SSH 会话，并记录最后一次连接失败的结构化错误。
     pub async fn connect(&self, server_id: &str) -> AppResult<ConnectOutcome> {
         if self.connections.contains_key(server_id) {
             return Ok(ConnectOutcome::Connected(self.snapshot(server_id)));
@@ -128,7 +216,31 @@ impl SshConnectionManager {
         }
         let result = self.connect_inner(server_id).await;
         self.connecting.remove(server_id);
+        match &result {
+            Ok(_) => {
+                self.errors.remove(server_id);
+            }
+            Err(error) => {
+                self.errors.insert(server_id.to_string(), error.clone());
+            }
+        }
         result
+    }
+
+    /// 断开旧会话后以有限次数重试连接；Host Key 挑战或不可恢复错误会立即返回。
+    pub async fn reconnect(&self, server_id: &str) -> AppResult<ConnectOutcome> {
+        let _ = self.disconnect(server_id).await;
+        let delays = [Duration::from_millis(250), Duration::from_millis(500)];
+        for attempt in 0..=delays.len() {
+            match self.connect(server_id).await {
+                Ok(outcome) => return Ok(outcome),
+                Err(error) if attempt < delays.len() && is_retryable_connect_error(error.code) => {
+                    tokio::time::sleep(delays[attempt]).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(AppError::new("SSH_RECONNECT_FAILED", "ssh", "SSH 重连失败").for_server(server_id))
     }
 
     async fn connect_inner(&self, server_id: &str) -> AppResult<ConnectOutcome> {
@@ -141,9 +253,10 @@ impl SshConnectionManager {
             observation: observation.clone(),
         };
         let config = client::Config {
-            inactivity_timeout: Some(Duration::from_secs(record.connect_timeout().max(5))),
-            keepalive_interval: Some(Duration::from_secs(record.keepalive().max(5))),
-            keepalive_max: 3,
+            // connect_timeout 只限制首次握手；不能拿它作为空闲超时，否则默认 10 秒会误杀长期会话。
+            inactivity_timeout: None,
+            keepalive_interval: Some(Duration::from_secs(record.keepalive().clamp(10, 300))),
+            keepalive_max: 6,
             ..Default::default()
         };
         let address = (record.host.as_str(), record.port as u16);
@@ -247,7 +360,9 @@ impl SshConnectionManager {
         }
     }
 
+    /// 主动关闭服务器会话、关联终端，并清除可恢复的连接错误。
     pub async fn disconnect(&self, server_id: &str) -> AppResult<()> {
+        self.errors.remove(server_id);
         let terminal_ids: Vec<String> = self
             .terminals
             .iter()
@@ -277,13 +392,7 @@ impl SshConnectionManager {
         columns: u32,
         rows: u32,
     ) -> AppResult<(String, mpsc::Receiver<TerminalEvent>)> {
-        let connection = self
-            .connections
-            .get(server_id)
-            .map(|value| value.clone())
-            .ok_or_else(|| {
-                AppError::new("SSH_NOT_CONNECTED", "ssh", "服务器尚未连接").for_server(server_id)
-            })?;
+        let connection = self.connection_for_operation(server_id).await?;
         let channel = connection
             .handle
             .channel_open_session()
@@ -414,13 +523,7 @@ impl SshConnectionManager {
     }
 
     pub async fn open_sftp(&self, server_id: &str) -> AppResult<russh_sftp::client::SftpSession> {
-        let connection = self
-            .connections
-            .get(server_id)
-            .map(|value| value.clone())
-            .ok_or_else(|| {
-                AppError::new("SSH_NOT_CONNECTED", "ssh", "服务器尚未连接").for_server(server_id)
-            })?;
+        let connection = self.connection_for_operation(server_id).await?;
         let channel = connection
             .handle
             .channel_open_session()
@@ -449,16 +552,52 @@ impl SshConnectionManager {
         Ok(session)
     }
 
+    /// 在已认证连接上执行一次非交互远程命令并收集完整 stdout/stderr。
     pub async fn execute(
         &self,
         server_id: &str,
         command: &str,
         timeout: Duration,
     ) -> AppResult<RemoteCommandResult> {
-        self.execute_with_input(server_id, command, None, timeout)
+        self.execute_with_input(server_id, command, None, timeout, None, None)
             .await
     }
 
+    /// 在独立 SSH channel 上执行命令，并逐块转发 stdout/stderr 到 Tauri Channel。
+    #[allow(dead_code)]
+    pub async fn execute_stream(
+        &self,
+        server_id: &str,
+        command: &str,
+        timeout: Duration,
+        events: &Channel<CommandEvent>,
+    ) -> AppResult<RemoteCommandResult> {
+        self.execute_with_input(server_id, command, None, timeout, Some(events), None)
+            .await
+    }
+
+    /// 执行可取消的流式命令，并在 SSH channel 等待输出时响应取消请求。
+    pub async fn execute_stream_task(
+        &self,
+        server_id: &str,
+        command: &str,
+        timeout: Duration,
+        events: &Channel<CommandEvent>,
+        task_id: &str,
+    ) -> AppResult<RemoteCommandResult> {
+        let guard = self.tasks.begin(task_id)?;
+        self.execute_with_input(
+            server_id,
+            command,
+            None,
+            timeout,
+            Some(events),
+            Some(guard.state()),
+        )
+        .await
+    }
+
+    /// 按服务器 sudo 模式执行命令；密码只通过 SSH stdin 发送，不进入命令字符串。
     pub async fn execute_privileged(
         &self,
         server_id: &str,
@@ -476,6 +615,8 @@ impl SshConnectionManager {
                     ),
                     None,
                     timeout,
+                    None,
+                    None,
                 )
                 .await
             }
@@ -496,6 +637,8 @@ impl SshConnectionManager {
                         ),
                         Some(input.as_slice()),
                         timeout,
+                        None,
+                        None,
                     )
                     .await?;
                 if result.exit_code != 0 && result.stderr.to_ascii_lowercase().contains("password")
@@ -515,20 +658,114 @@ impl SshConnectionManager {
         }
     }
 
+    /// 以已配置的 sudo 模式执行可取消的流式命令，并把输出转发到 Tauri Channel。
+    pub async fn execute_stream_privileged_task(
+        &self,
+        server_id: &str,
+        command: &str,
+        timeout: Duration,
+        events: &Channel<CommandEvent>,
+        task_id: &str,
+    ) -> AppResult<RemoteCommandResult> {
+        let guard = self.tasks.begin(task_id)?;
+        self.execute_stream_privileged_inner(
+            server_id,
+            command,
+            timeout,
+            events,
+            Some(guard.state()),
+        )
+        .await
+    }
+
+    /// 以已配置的 sudo 模式执行流式命令；未注册 task 时保留原有不可取消调用。
+    #[allow(dead_code)]
+    pub async fn execute_stream_privileged(
+        &self,
+        server_id: &str,
+        command: &str,
+        timeout: Duration,
+        events: &Channel<CommandEvent>,
+    ) -> AppResult<RemoteCommandResult> {
+        self.execute_stream_privileged_inner(server_id, command, timeout, events, None)
+            .await
+    }
+
+    /// 处理 sudo 流式命令的认证分支，并把取消令牌传入 SSH channel。
+    async fn execute_stream_privileged_inner(
+        &self,
+        server_id: &str,
+        command: &str,
+        timeout: Duration,
+        events: &Channel<CommandEvent>,
+        cancellation: Option<Arc<CommandTaskState>>,
+    ) -> AppResult<RemoteCommandResult> {
+        let record = self.repository.record(server_id).await?;
+        match record.sudo_mode.as_str() {
+            "passwordless" => {
+                self.execute_with_input(
+                    server_id,
+                    &format!(
+                        "sudo -n -- sh -c {}",
+                        crate::security::shell_escape(command)
+                    ),
+                    None,
+                    timeout,
+                    Some(events),
+                    cancellation.clone(),
+                )
+                .await
+            }
+            "password" => {
+                let reference = record.sudo_secret_ref.as_deref().ok_or_else(|| {
+                    AppError::new("SUDO_AUTH_FAILED", "privilege", "服务器未保存 sudo 密码")
+                        .for_server(server_id)
+                })?;
+                let secret = self.repository.credential(reference)?;
+                let mut input = zeroize::Zeroizing::new(secret.expose_secret().as_bytes().to_vec());
+                input.push(b'\n');
+                let result = self
+                    .execute_with_input(
+                        server_id,
+                        &format!(
+                            "sudo -S -p '' -- sh -c {}",
+                            crate::security::shell_escape(command)
+                        ),
+                        Some(input.as_slice()),
+                        timeout,
+                        Some(events),
+                        cancellation,
+                    )
+                    .await?;
+                if result.exit_code != 0 && result.stderr.to_ascii_lowercase().contains("password")
+                {
+                    return Err(
+                        AppError::new("SUDO_AUTH_FAILED", "privilege", "sudo 认证失败")
+                            .for_server(server_id),
+                    );
+                }
+                Ok(result)
+            }
+            _ => Err(
+                AppError::new("SUDO_REQUIRED", "privilege", "该服务器档案未启用 sudo")
+                    .for_server(server_id)
+                    .suggestion("编辑服务器档案并选择 sudo 模式"),
+            ),
+        }
+    }
+
+    /// 在受连接并发限制的 SSH channel 上执行命令，并可选地转发原始输出块。
+    /// 统一通过远端 `sh -c` 执行，以支持探测脚本中的 if/for 等复合命令；命令内容来自受控的领域层，外层参数会先做 shell 转义。
     async fn execute_with_input(
         &self,
         server_id: &str,
         command: &str,
         input: Option<&[u8]>,
         timeout: Duration,
+        events: Option<&Channel<CommandEvent>>,
+        cancellation: Option<Arc<CommandTaskState>>,
     ) -> AppResult<RemoteCommandResult> {
-        let connection = self
-            .connections
-            .get(server_id)
-            .map(|value| value.clone())
-            .ok_or_else(|| {
-                AppError::new("SSH_NOT_CONNECTED", "ssh", "服务器尚未连接").for_server(server_id)
-            })?;
+        let connection = self.connection_for_operation(server_id).await?;
         let _permit =
             connection.limiter.acquire().await.map_err(|_| {
                 AppError::new("CANCELLED", "task", "命令已取消").for_server(server_id)
@@ -545,7 +782,7 @@ impl SshConnectionManager {
                         .for_server(server_id)
                 })?;
             channel
-                .exec(true, format!("LC_ALL=C {}", command))
+                .exec(true, wrap_remote_command(command))
                 .await
                 .map_err(|error| {
                     AppError::new(
@@ -579,28 +816,111 @@ impl SshConnectionManager {
             let mut stdout = Vec::new();
             let mut stderr = Vec::new();
             let mut exit_code = None;
-            while let Some(message) = channel.wait().await {
+            loop {
+                let message = if let Some(cancellation) = cancellation.as_ref() {
+                    if cancellation.cancelled.load(Ordering::Acquire) {
+                        let _ = channel.close().await;
+                        if let Some(events) = events {
+                            let _ = events.send(CommandEvent::Cancelled);
+                        }
+                        return Err(cancelled_error(server_id));
+                    }
+                    tokio::select! {
+                        _ = cancellation.notify.notified() => {
+                            let _ = channel.close().await;
+                            if let Some(events) = events {
+                                let _ = events.send(CommandEvent::Cancelled);
+                            }
+                            return Err(cancelled_error(server_id));
+                        }
+                        message = channel.wait() => message,
+                    }
+                } else {
+                    channel.wait().await
+                };
+                let Some(message) = message else { break };
                 match message {
-                    russh::ChannelMsg::Data { data } => stdout.extend_from_slice(&data),
+                    russh::ChannelMsg::Data { data } => {
+                        stdout.extend_from_slice(&data);
+                        if let Some(events) = events {
+                            let _ = events.send(CommandEvent::Output {
+                                stream: "stdout".into(),
+                                data: String::from_utf8_lossy(&data).into_owned(),
+                            });
+                        }
+                    }
                     russh::ChannelMsg::ExtendedData { data, ext: 1 } => {
-                        stderr.extend_from_slice(&data)
+                        stderr.extend_from_slice(&data);
+                        if let Some(events) = events {
+                            let _ = events.send(CommandEvent::Output {
+                                stream: "stderr".into(),
+                                data: String::from_utf8_lossy(&data).into_owned(),
+                            });
+                        }
                     }
                     russh::ChannelMsg::ExitStatus { exit_status } => exit_code = Some(exit_status),
                     _ => {}
                 }
             }
-            Ok(RemoteCommandResult {
+            let result = RemoteCommandResult {
                 exit_code: exit_code.unwrap_or(255),
                 stdout: String::from_utf8_lossy(&stdout).into_owned(),
                 stderr: String::from_utf8_lossy(&stderr).into_owned(),
                 duration_ms: started.elapsed().as_millis() as u64,
-            })
+            };
+            if let Some(events) = events {
+                let _ = events.send(CommandEvent::Completed {
+                    exit_code: result.exit_code,
+                });
+            }
+            Ok(result)
         };
         tokio::time::timeout(timeout, future).await.map_err(|_| {
             AppError::new("COMMAND_TIMEOUT", "remote_command", "远程命令执行超时")
                 .for_server(server_id)
         })?
     }
+
+    /// 返回可执行远程操作的 SSH 会话；发现网络断开时，仅对已建立过的会话自动重连。
+    async fn connection_for_operation(&self, server_id: &str) -> AppResult<Arc<ManagedConnection>> {
+        if let Some(connection) = self.connections.get(server_id).map(|value| value.clone()) {
+            if !connection.handle.is_closed() {
+                return Ok(connection);
+            }
+            self.connections.remove(server_id);
+            self.errors
+                .insert(server_id.to_string(), connection_lost_error(server_id));
+        }
+
+        let should_reconnect = self
+            .errors
+            .get(server_id)
+            .is_some_and(|error| error.code == "SSH_CONNECTION_LOST");
+        if should_reconnect {
+            if let Ok(ConnectOutcome::Connected(_)) = self.reconnect(server_id).await {
+                if let Some(connection) = self.connections.get(server_id).map(|value| value.clone())
+                {
+                    return Ok(connection);
+                }
+            }
+        }
+
+        Err(AppError::new("SSH_NOT_CONNECTED", "ssh", "服务器尚未连接")
+            .for_server(server_id)
+            .suggestion("请返回服务器概览，点击“重新连接”后再继续操作"))
+    }
+}
+
+/// 创建统一的流式命令取消错误，供 UI 将任务标记为已取消。
+fn cancelled_error(server_id: &str) -> AppError {
+    AppError::new("CANCELLED", "task", "远程任务已取消").for_server(server_id)
+}
+
+/// 生成统一的会话失效错误，供状态栏、错误提示和按需重连共用。
+fn connection_lost_error(server_id: &str) -> AppError {
+    AppError::new("SSH_CONNECTION_LOST", "ssh", "SSH 连接已断开")
+        .for_server(server_id)
+        .suggestion("正在尝试恢复连接；若仍失败，请检查网络和服务器 SSH 服务")
 }
 
 #[derive(Clone)]
@@ -768,6 +1088,19 @@ fn map_connect_error(error: russh::Error, server_id: &str) -> AppError {
         .suggestion("检查 SSH 服务、端口、防火墙与支持的密钥算法")
 }
 
+/// 判断连接错误是否适合进行短暂退避重试，不重试凭据、Host Key 和参数错误。
+fn is_retryable_connect_error(code: &str) -> bool {
+    matches!(code, "NETWORK_TIMEOUT" | "SSH_CONNECT_FAILED")
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase", tag = "event", content = "data")]
+pub enum CommandEvent {
+    Output { stream: String, data: String },
+    Completed { exit_code: u32 },
+    Cancelled,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteCommandResult {
@@ -775,4 +1108,26 @@ pub struct RemoteCommandResult {
     pub stdout: String,
     pub stderr: String,
     pub duration_ms: u64,
+}
+
+/// 将受控远程命令包裹为可执行的 POSIX Shell 脚本，并固定远端输出语言为 C。
+fn wrap_remote_command(command: &str) -> String {
+    format!(
+        "sh -c {}",
+        crate::security::shell_escape(&format!("export LC_ALL=C; {command}"))
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_remote_command;
+
+    #[test]
+    fn wraps_compound_commands_inside_shell() {
+        let command = wrap_remote_command(
+            "if command -v ss; then for item in ss lsof; do printf '%s' \"$item\"; done; fi",
+        );
+        assert!(command.starts_with("sh -c 'export LC_ALL=C; if command -v ss;"));
+        assert!(command.contains("for item in ss lsof"));
+    }
 }

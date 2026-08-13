@@ -1,8 +1,9 @@
-import { ArrowDownToLine, ArrowUpFromLine, Check, CircleX, LoaderCircle, Trash2, X } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Check, CircleX, LoaderCircle, RefreshCw, Trash2, X } from "lucide-react";
 import { api } from "../../lib/api";
 import { formatBytes } from "../../lib/format";
 import { useTransferStore } from "./transferStore";
 
+/** 显示跨页面持续存在的文件传输，并允许失败或取消任务重新提交。 */
 export function TransferCenter({ open, onClose }: { open: boolean; onClose: () => void }) {
   const tasks = useTransferStore((state) => state.tasks);
   const clearFinished = useTransferStore((state) => state.clearFinished);
@@ -16,7 +17,7 @@ export function TransferCenter({ open, onClose }: { open: boolean; onClose: () =
         return <article key={task.id}>
           <span className="transfer-direction">{task.direction === "upload" ? <ArrowUpFromLine size={15} /> : <ArrowDownToLine size={15} />}</span>
           <div><strong>{task.label}</strong><small>{task.error ?? task.currentPath}</small><div className={`transfer-progress ${task.totalBytes ? "" : "is-indeterminate"}`}><i style={{ width: task.totalBytes ? `${percent}%` : undefined }} /></div><footer><span>{formatBytes(task.transferredBytes)}{task.totalBytes ? ` / ${formatBytes(task.totalBytes)}` : ""}</span><span>{task.status === "running" ? `${formatBytes(task.bytesPerSecond)}/s` : statusLabel(task.status)}</span></footer></div>
-          <span className={`transfer-status is-${task.status}`}>{task.status === "running" || task.status === "queued" ? <button title="取消传输" onClick={() => void api.cancelTransfer(task.id)}><CircleX size={15} /></button> : task.status === "success" ? <Check size={15} /> : task.status === "failed" ? <CircleX size={15} /> : <LoaderCircle size={15} />}</span>
+          <span className={`transfer-status is-${task.status}`}>{task.status === "running" || task.status === "queued" ? <button title="取消传输" onClick={() => void api.cancelTransfer(task.id)}><CircleX size={15} /></button> : task.status === "success" ? <Check size={15} /> : task.retry ? <button title="重试传输" onClick={task.retry}><RefreshCw size={15} /></button> : task.status === "failed" ? <CircleX size={15} /> : <LoaderCircle size={15} />}</span>
         </article>;
       })}
     </div>

@@ -1,10 +1,29 @@
-use crate::domain::server::{SaveServerInput, ServerProfile, ServerRecord};
+use crate::domain::backup::{BackupPayload, BackupServer};
+use crate::domain::server::{
+    PublicServerExport, PublicServerImport, PublicServerProfile, SaveServerInput, ServerGroup,
+    ServerProfile, ServerRecord,
+};
 use crate::errors::{AppError, AppResult};
 use chrono::Utc;
 use secrecy::{ExposeSecret, SecretString};
+use serde::Serialize;
 use sqlx::{SqlitePool, Transaction};
 use std::sync::Arc;
 use uuid::Uuid;
+
+/// 表示本地审计表中的一条非敏感操作元数据。
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEvent {
+    pub id: String,
+    pub server_id: Option<String>,
+    pub action: String,
+    pub resource_type: String,
+    pub resource_id: Option<String>,
+    pub result: String,
+    pub summary: String,
+    pub created_at: chrono::DateTime<Utc>,
+}
 
 #[derive(Clone)]
 pub struct ServerRepository {
@@ -33,6 +52,81 @@ impl ServerRepository {
         self.attach_tags(records).await
     }
 
+    /// 读取本地服务器分组，供侧栏和服务器编辑表单复用。
+    pub async fn list_groups(&self) -> AppResult<Vec<ServerGroup>> {
+        sqlx::query_as::<_, ServerGroup>(
+            "SELECT id, name, sort_order, created_at FROM server_groups ORDER BY sort_order, name",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(AppError::database)
+    }
+
+    /// 写入一条不含命令输出、凭据或私钥内容的本地审计事件。
+    pub async fn record_audit(
+        &self,
+        server_id: Option<&str>,
+        action: &str,
+        resource_type: &str,
+        resource_id: Option<&str>,
+        result: &str,
+        summary: &str,
+    ) -> AppResult<()> {
+        sqlx::query(
+            "INSERT INTO audit_events (id,server_id,action,resource_type,resource_id,result,summary,created_at) VALUES (?,?,?,?,?,?,?,?)",
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(server_id)
+        .bind(action)
+        .bind(resource_type)
+        .bind(resource_id)
+        .bind(result)
+        .bind(summary)
+        .bind(Utc::now())
+        .execute(&self.pool)
+        .await
+        .map_err(AppError::database)?;
+        Ok(())
+    }
+
+    /// 读取最近的审计元数据，供设置页和诊断导出查看。
+    pub async fn list_audit(&self, limit: u32) -> AppResult<Vec<AuditEvent>> {
+        sqlx::query_as::<_, AuditEvent>(
+            "SELECT id,server_id,action,resource_type,resource_id,result,summary,created_at FROM audit_events ORDER BY created_at DESC LIMIT ?",
+        )
+        .bind(i64::from(limit.clamp(1, 200)))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(AppError::database)
+    }
+
+    /// 创建一个本地服务器分组；名称必须唯一且不能为空。
+    pub async fn create_group(&self, name: String) -> AppResult<ServerGroup> {
+        let name = name.trim().to_string();
+        if name.is_empty() || name.len() > 80 {
+            return Err(AppError::new(
+                "VALIDATION_FAILED",
+                "validation",
+                "分组名称不能为空且不能超过 80 个字符",
+            ));
+        }
+        let group = ServerGroup {
+            id: Uuid::new_v4().to_string(),
+            name,
+            sort_order: 0,
+            created_at: Utc::now(),
+        };
+        sqlx::query("INSERT INTO server_groups (id,name,sort_order,created_at) VALUES (?,?,?,?)")
+            .bind(&group.id)
+            .bind(&group.name)
+            .bind(group.sort_order)
+            .bind(group.created_at)
+            .execute(&self.pool)
+            .await
+            .map_err(AppError::database)?;
+        Ok(group)
+    }
+
     pub async fn get(&self, id: &str) -> AppResult<ServerProfile> {
         let profile = sqlx::query_as::<_, ServerProfile>(
             r#"SELECT id, name, description, host, port, username, auth_type, private_key_path,
@@ -50,6 +144,164 @@ impl ServerRepository {
         self.attach_tags(vec![profile])
             .await
             .map(|mut values| values.remove(0))
+    }
+
+    /// 导出不含凭据内容的服务器配置，供用户保存为版本化 JSON。
+    pub async fn export_public(&self) -> AppResult<PublicServerExport> {
+        let servers = self
+            .list()
+            .await?
+            .into_iter()
+            .map(|value| PublicServerProfile {
+                name: value.name,
+                description: value.description,
+                host: value.host,
+                port: value.port,
+                username: value.username,
+                auth_type: value.auth_type,
+                private_key_path: value.private_key_path,
+                sudo_mode: value.sudo_mode,
+                group_id: value.group_id,
+                tags: value.tags,
+                favorite: value.favorite,
+                connect_timeout: value.connect_timeout,
+                keepalive: value.keepalive,
+                encoding: value.encoding,
+            })
+            .collect();
+        Ok(PublicServerExport {
+            format: "agentless-server-manager-backup".into(),
+            version: 1,
+            encrypted: false,
+            servers,
+        })
+    }
+
+    /// 导入公共配置并始终生成新 ID，避免覆盖已有服务器；secret 需由用户重新录入。
+    pub async fn import_public(
+        &self,
+        values: Vec<PublicServerImport>,
+    ) -> AppResult<Vec<ServerProfile>> {
+        let mut imported = Vec::with_capacity(values.len());
+        for value in values {
+            imported.push(
+                self.save(SaveServerInput {
+                    id: Some(Uuid::new_v4().to_string()),
+                    name: value.name,
+                    description: value.description,
+                    host: value.host,
+                    port: value.port,
+                    username: value.username,
+                    auth_type: value.auth_type,
+                    password: None,
+                    private_key_path: value.private_key_path,
+                    private_key_passphrase: None,
+                    sudo_mode: value.sudo_mode,
+                    sudo_password: None,
+                    group_id: value.group_id,
+                    connect_timeout: Some(value.connect_timeout as u64),
+                    keepalive: Some(value.keepalive as u64),
+                    encoding: Some(value.encoding),
+                    tags: value.tags,
+                    favorite: value.favorite,
+                })
+                .await?,
+            );
+        }
+        Ok(imported)
+    }
+
+    /// 复制服务器公共配置并生成新 ID；凭据不会复制，用户需在新档案中重新录入。
+    pub async fn duplicate(&self, id: &str) -> AppResult<ServerProfile> {
+        let profile = self.get(id).await?;
+        self.save(SaveServerInput {
+            id: Some(Uuid::new_v4().to_string()),
+            name: format!("{} (副本)", profile.name),
+            description: profile.description,
+            host: profile.host,
+            port: u16::try_from(profile.port)
+                .map_err(|_| AppError::new("SERVER_INVALID", "server", "服务器端口无效"))?,
+            username: profile.username,
+            auth_type: profile.auth_type,
+            password: None,
+            private_key_path: profile.private_key_path,
+            private_key_passphrase: None,
+            sudo_mode: profile.sudo_mode,
+            sudo_password: None,
+            group_id: profile.group_id,
+            connect_timeout: Some(profile.connect_timeout as u64),
+            keepalive: Some(profile.keepalive as u64),
+            encoding: Some(profile.encoding),
+            tags: profile.tags,
+            favorite: false,
+        })
+        .await
+    }
+
+    /// 读取服务器档案及其系统凭据，供上层加密为完整备份；secret 不进入数据库或日志。
+    pub async fn export_backup(&self) -> AppResult<BackupPayload> {
+        let profiles = self.list().await?;
+        let mut servers = Vec::with_capacity(profiles.len());
+        for profile in profiles {
+            let record = self.record(&profile.id).await?;
+            servers.push(BackupServer {
+                profile: PublicServerProfile {
+                    name: profile.name,
+                    description: profile.description,
+                    host: profile.host,
+                    port: profile.port,
+                    username: profile.username,
+                    auth_type: profile.auth_type,
+                    private_key_path: profile.private_key_path,
+                    sudo_mode: profile.sudo_mode,
+                    group_id: profile.group_id,
+                    tags: profile.tags,
+                    favorite: profile.favorite,
+                    connect_timeout: profile.connect_timeout,
+                    keepalive: profile.keepalive,
+                    encoding: profile.encoding,
+                },
+                password: self.read_optional_secret(record.password_secret_ref.as_deref())?,
+                private_key_passphrase: self
+                    .read_optional_secret(record.key_passphrase_secret_ref.as_deref())?,
+                sudo_password: self.read_optional_secret(record.sudo_secret_ref.as_deref())?,
+            });
+        }
+        Ok(BackupPayload { servers })
+    }
+
+    /// 解密后的完整备份以新 ID 导入，并将凭据重新写入操作系统安全存储。
+    pub async fn import_backup(&self, payload: BackupPayload) -> AppResult<Vec<ServerProfile>> {
+        let mut imported = Vec::with_capacity(payload.servers.len());
+        for value in payload.servers {
+            let profile = value.profile;
+            imported.push(
+                self.save(SaveServerInput {
+                    id: Some(Uuid::new_v4().to_string()),
+                    name: profile.name,
+                    description: profile.description,
+                    host: profile.host,
+                    port: u16::try_from(profile.port).map_err(|_| {
+                        AppError::new("BACKUP_INVALID", "backup", "备份中的 SSH 端口无效")
+                    })?,
+                    username: profile.username,
+                    auth_type: profile.auth_type,
+                    password: value.password.map(SecretString::from),
+                    private_key_path: profile.private_key_path,
+                    private_key_passphrase: value.private_key_passphrase.map(SecretString::from),
+                    sudo_mode: profile.sudo_mode,
+                    sudo_password: value.sudo_password.map(SecretString::from),
+                    group_id: None,
+                    connect_timeout: Some(profile.connect_timeout as u64),
+                    keepalive: Some(profile.keepalive as u64),
+                    encoding: Some(profile.encoding),
+                    tags: profile.tags,
+                    favorite: profile.favorite,
+                })
+                .await?,
+            );
+        }
+        Ok(imported)
     }
 
     pub async fn record(&self, id: &str) -> AppResult<ServerRecord> {
@@ -74,6 +326,7 @@ impl ServerRepository {
         Ok(profiles)
     }
 
+    /// 校验并保存服务器档案；凭据只写入 CredentialStore，数据库仅保留引用。
     pub async fn save(&self, input: SaveServerInput) -> AppResult<ServerProfile> {
         input.validate()?;
         let id = input
@@ -132,9 +385,12 @@ impl ServerRepository {
             .as_ref()
             .map(|value| value.created_at)
             .unwrap_or(now);
-        let settings =
-            serde_json::json!({"connectTimeout": 10, "keepalive": 30, "encoding": "UTF-8"})
-                .to_string();
+        let settings = serde_json::json!({
+            "connectTimeout": input.connect_timeout.unwrap_or(10).clamp(5, 120),
+            "keepalive": input.keepalive.unwrap_or(30).clamp(5, 300),
+            "encoding": input.encoding.as_deref().unwrap_or("UTF-8"),
+        })
+        .to_string();
         let mut transaction = self.pool.begin().await.map_err(AppError::database)?;
         sqlx::query(
             r#"INSERT INTO servers (id,name,description,host,port,username,auth_type,password_secret_ref,
@@ -149,7 +405,7 @@ impl ServerRepository {
         .bind(&id).bind(input.name.trim()).bind(input.description.trim()).bind(input.host.trim())
         .bind(i64::from(input.port)).bind(input.username.trim()).bind(&input.auth_type).bind(password_ref.as_deref())
         .bind(input.private_key_path.as_deref().map(str::trim)).bind(passphrase_ref.as_deref()).bind(&input.sudo_mode)
-        .bind(sudo_ref.as_deref()).bind(Option::<String>::None).bind(input.favorite).bind(settings)
+        .bind(sudo_ref.as_deref()).bind(input.group_id.as_deref()).bind(input.favorite).bind(settings)
         .bind(created_at).bind(now)
         .execute(&mut *transaction).await.map_err(AppError::database)?;
         self.replace_tags(&mut transaction, &id, input.tags).await?;
@@ -267,6 +523,16 @@ impl ServerRepository {
 
     pub fn credential(&self, reference: &str) -> AppResult<SecretString> {
         self.credentials.get(reference)
+    }
+
+    /// 从系统凭据库读取可选 secret，并立即复制成仅供加密流程使用的内存字符串。
+    fn read_optional_secret(&self, reference: Option<&str>) -> AppResult<Option<String>> {
+        reference
+            .map(|value| {
+                self.credential(value)
+                    .map(|secret| secret.expose_secret().to_owned())
+            })
+            .transpose()
     }
 }
 

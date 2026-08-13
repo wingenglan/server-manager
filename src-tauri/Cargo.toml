@@ -1,6 +1,6 @@
 [package]
 name = "agentless-server-manager"
-version = "0.1.0"
+version = "0.2.3"
 description = "Local-first agentless Linux server operations desktop client"
 authors = ["Relay contributors"]
 edition = "2021"
@@ -38,3 +38,6 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 uuid = { version = "1.24.0", features = ["v4", "serde"] }
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "migrate", "chrono", "uuid"] }
 base64 = "0.23.1"
+argon2 = "0.6.0-rc.8"
+aes-gcm = "0.11.0"
+rand = "0.10.2"

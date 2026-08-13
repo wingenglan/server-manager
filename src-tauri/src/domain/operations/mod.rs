@@ -8,6 +8,8 @@ use std::time::Duration;
 pub struct OperationsSnapshot {
     pub processes: Vec<ProcessInfo>,
     pub ports: Vec<PortInfo>,
+    pub ports_source: String,
+    pub ports_warning: Option<String>,
     pub services: Vec<ServiceInfo>,
 }
 
@@ -27,7 +29,7 @@ pub struct ProcessInfo {
     pub systemd_unit: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortInfo {
     pub protocol: String,
@@ -47,6 +49,26 @@ pub struct ServiceInfo {
     pub active: String,
     pub sub: String,
     pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceDetail {
+    pub name: String,
+    pub description: String,
+    pub load: String,
+    pub active: String,
+    pub sub: String,
+    pub main_pid: Option<u32>,
+    pub fragment_path: String,
+    pub unit_file_state: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceLogs {
+    pub name: String,
+    pub output: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,35 +92,50 @@ pub struct TerminationResult {
     pub port_released: Option<bool>,
 }
 
+/// 读取进程、监听端口和 systemd 服务；端口探测支持 ss/lsof 与显式 sudo 重扫。
 pub async fn snapshot(
     ssh: &SshConnectionManager,
     server_id: &str,
+    privileged: bool,
 ) -> AppResult<OperationsSnapshot> {
     let (processes, ports, services) = tokio::join!(
-        ssh.execute(
+        execute_probe(
+            ssh,
             server_id,
             "ps -eo pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,etimes=,comm=,args=",
-            Duration::from_secs(30)
+            Duration::from_secs(30),
+            privileged,
         ),
-        ssh.execute(server_id, "ss -H -lntup", Duration::from_secs(30)),
-        ssh.execute(
+        execute_probe(
+            ssh,
+            server_id,
+            port_scan_command(),
+            Duration::from_secs(30),
+            privileged,
+        ),
+        execute_probe(
+            ssh,
             server_id,
             "systemctl list-units --type=service --all --no-legend --no-pager --plain",
-            Duration::from_secs(30)
+            Duration::from_secs(30),
+            privileged,
         )
     );
     let processes = processes?;
     let ports = ports?;
     let services = services?;
     if processes.exit_code != 0 {
-        return Err(remote_failure(server_id, "ps", processes.stderr));
+        return Err(remote_failure(server_id, "进程列表", processes.stderr));
     }
     if ports.exit_code != 0 {
-        return Err(remote_failure(server_id, "ss", ports.stderr));
+        return Err(remote_failure(server_id, "端口扫描", ports.stderr));
     }
+    let port_scan = parse_port_scan(&ports.stdout);
     Ok(OperationsSnapshot {
         processes: parse_processes(&processes.stdout),
-        ports: parse_ports(&ports.stdout),
+        ports: port_scan.ports,
+        ports_source: port_scan.source,
+        ports_warning: port_scan.warning,
         services: if services.exit_code == 0 {
             parse_services(&services.stdout)
         } else {
@@ -107,6 +144,7 @@ pub async fn snapshot(
     })
 }
 
+/// 发送 SIGTERM/SIGKILL，并按用户选择的权限验证进程与端口是否释放。
 pub async fn terminate(
     ssh: &SshConnectionManager,
     input: TerminateProcessInput,
@@ -136,23 +174,26 @@ pub async fn terminate(
         );
     }
     tokio::time::sleep(Duration::from_millis(900)).await;
-    let verify = ssh
-        .execute(
-            &input.server_id,
-            &format!("kill -0 -- {} 2>/dev/null", input.pid),
-            Duration::from_secs(10),
-        )
-        .await?;
+    let verify = execute_probe(
+        ssh,
+        &input.server_id,
+        &format!("kill -0 -- {} 2>/dev/null", input.pid),
+        Duration::from_secs(10),
+        input.privileged,
+    )
+    .await?;
     let process_exited = verify.exit_code != 0;
     let port_released = if let Some(port) = input.port {
-        let ports = ssh
-            .execute(&input.server_id, "ss -H -lntup", Duration::from_secs(10))
-            .await?;
-        Some(
-            !parse_ports(&ports.stdout)
-                .iter()
-                .any(|value| value.port == port),
+        let ports = execute_probe(
+            ssh,
+            &input.server_id,
+            port_scan_command(),
+            Duration::from_secs(10),
+            input.privileged,
         )
+        .await?;
+        let scan = parse_port_scan(&ports.stdout);
+        Some(scan.source != "none" && !scan.ports.iter().any(|value| value.port == port))
     } else {
         None
     };
@@ -164,13 +205,16 @@ pub async fn terminate(
     })
 }
 
+/// 执行 systemd 服务动作，并用 is-active/is-enabled 验证最终状态。
 pub async fn service_action(
     ssh: &SshConnectionManager,
     server_id: &str,
     service: &str,
     action: &str,
 ) -> AppResult<()> {
-    if !valid_unit(service) || !matches!(action, "start" | "stop" | "restart") {
+    if !valid_unit(service)
+        || !matches!(action, "start" | "stop" | "restart" | "enable" | "disable")
+    {
         return Err(AppError::new(
             "VALIDATION_FAILED",
             "validation",
@@ -191,7 +235,107 @@ pub async fn service_action(
                 .for_server(server_id),
         );
     }
+    let verification_command = if matches!(action, "enable" | "disable") {
+        format!(
+            "systemctl is-enabled --quiet -- {}",
+            crate::security::shell_escape(service)
+        )
+    } else {
+        format!(
+            "systemctl is-active --quiet -- {}",
+            crate::security::shell_escape(service)
+        )
+    };
+    let verification = ssh
+        .execute(server_id, &verification_command, Duration::from_secs(10))
+        .await?;
+    let should_be_active = matches!(action, "start" | "restart" | "enable");
+    if (verification.exit_code == 0) != should_be_active {
+        return Err(AppError::new(
+            "SERVICE_VERIFY_FAILED",
+            "systemd",
+            "systemd 操作后状态与预期不符",
+        )
+        .for_server(server_id)
+        .suggestion("重新扫描服务状态并检查 journal 日志"));
+    }
     Ok(())
+}
+
+/// 读取 systemd 单元的状态、主进程和来源路径，不执行任何改变操作。
+pub async fn service_detail(
+    ssh: &SshConnectionManager,
+    server_id: &str,
+    service: &str,
+) -> AppResult<ServiceDetail> {
+    if !valid_unit(service) {
+        return Err(AppError::new(
+            "VALIDATION_FAILED",
+            "validation",
+            "systemd 服务名无效",
+        ));
+    }
+    let result = ssh
+        .execute(
+            server_id,
+            &format!(
+                "systemctl show --no-pager -p Id,Description,LoadState,ActiveState,SubState,MainPID,FragmentPath,UnitFileState -- {}",
+                crate::security::shell_escape(service)
+            ),
+            Duration::from_secs(20),
+        )
+        .await?;
+    if result.exit_code != 0 {
+        return Err(remote_failure(server_id, "systemctl show", result.stderr));
+    }
+    let values = parse_properties(&result.stdout);
+    Ok(ServiceDetail {
+        name: values.get("Id").cloned().unwrap_or_else(|| service.into()),
+        description: values.get("Description").cloned().unwrap_or_default(),
+        load: values.get("LoadState").cloned().unwrap_or_default(),
+        active: values.get("ActiveState").cloned().unwrap_or_default(),
+        sub: values.get("SubState").cloned().unwrap_or_default(),
+        main_pid: values
+            .get("MainPID")
+            .and_then(|value| value.parse().ok())
+            .filter(|pid| *pid > 0),
+        fragment_path: values.get("FragmentPath").cloned().unwrap_or_default(),
+        unit_file_state: values.get("UnitFileState").cloned().unwrap_or_default(),
+    })
+}
+
+/// 读取指定 systemd 服务最近日志，限制行数并保持内容只在当前响应中存在。
+pub async fn service_logs(
+    ssh: &SshConnectionManager,
+    server_id: &str,
+    service: &str,
+    lines: u32,
+) -> AppResult<ServiceLogs> {
+    if !valid_unit(service) {
+        return Err(AppError::new(
+            "VALIDATION_FAILED",
+            "validation",
+            "systemd 服务名无效",
+        ));
+    }
+    let lines = lines.clamp(1, 2_000);
+    let result = ssh
+        .execute(
+            server_id,
+            &format!(
+                "journalctl --no-pager -o short-iso -n {lines} -u {}",
+                crate::security::shell_escape(service)
+            ),
+            Duration::from_secs(30),
+        )
+        .await?;
+    if result.exit_code != 0 {
+        return Err(remote_failure(server_id, "journalctl", result.stderr));
+    }
+    Ok(ServiceLogs {
+        name: service.into(),
+        output: result.stdout,
+    })
 }
 
 pub fn parse_processes(output: &str) -> Vec<ProcessInfo> {
@@ -257,6 +401,91 @@ pub fn parse_ports(output: &str) -> Vec<PortInfo> {
         .collect()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct PortScan {
+    ports: Vec<PortInfo>,
+    source: String,
+    warning: Option<String>,
+}
+
+/// 解析带来源标记的端口探测输出，并在 ss 不可用时支持 lsof 回退。
+fn parse_port_scan(output: &str) -> PortScan {
+    let mut source = "ss".to_string();
+    let mut body = Vec::new();
+    for line in output.lines() {
+        if let Some(value) = line.strip_prefix("__PORT_SOURCE__=") {
+            source = value.trim().to_string();
+        } else {
+            body.push(line);
+        }
+    }
+    let body = body.join("\n");
+    let ports = match source.as_str() {
+        "lsof" => parse_lsof_ports(&body),
+        "none" => Vec::new(),
+        _ => parse_ports(&body),
+    };
+    let warning = match source.as_str() {
+        "lsof" => Some("ss 不可用，已回退到 lsof；部分进程信息可能受权限限制".into()),
+        "none" => Some("远端没有可用的 ss 或 lsof，无法读取监听端口".into()),
+        _ => None,
+    };
+    PortScan {
+        ports,
+        source,
+        warning,
+    }
+}
+
+/// 解析 lsof 的网络监听行，保留协议、地址、端口和进程归属。
+fn parse_lsof_ports(output: &str) -> Vec<PortInfo> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 9 || fields[0] == "COMMAND" {
+                return None;
+            }
+            let pid = fields.get(1)?.parse().ok()?;
+            let protocol = fields.get(7)?.to_lowercase();
+            if !matches!(protocol.as_str(), "tcp" | "udp") {
+                return None;
+            }
+            let local = fields.get(8)?.trim_end_matches("(LISTEN)");
+            let (local_address, port) = split_socket(local)?;
+            Some(PortInfo {
+                protocol,
+                local_address: local_address.to_string(),
+                port,
+                pid: Some(pid),
+                process_name: Some(fields[0].to_string()),
+                ipv6: fields.get(4).is_some_and(|value| *value == "IPv6"),
+                process_visible: true,
+            })
+        })
+        .collect()
+}
+
+/// 生成优先使用 ss、缺失时回退 lsof 的远端端口探测命令；权限不足时保留可解析的空结果，不让整个运行现场页面失败。
+fn port_scan_command() -> &'static str {
+    "if command -v ss >/dev/null 2>&1; then printf '__PORT_SOURCE__=ss\\n'; ss -H -lntup 2>/dev/null || ss -H -lntu 2>/dev/null || true; elif command -v lsof >/dev/null 2>&1; then printf '__PORT_SOURCE__=lsof\\n'; lsof -nP -iTCP -sTCP:LISTEN -iUDP 2>/dev/null || true; else printf '__PORT_SOURCE__=none\\n'; fi"
+}
+
+/// 根据 UI 的权限选择执行普通或 sudo 运行现场探测命令。
+async fn execute_probe(
+    ssh: &SshConnectionManager,
+    server_id: &str,
+    command: &str,
+    timeout: Duration,
+    privileged: bool,
+) -> AppResult<crate::domain::ssh::RemoteCommandResult> {
+    if privileged {
+        ssh.execute_privileged(server_id, command, timeout).await
+    } else {
+        ssh.execute(server_id, command, timeout).await
+    }
+}
+
 pub fn parse_services(output: &str) -> Vec<ServiceInfo> {
     output
         .lines()
@@ -270,6 +499,15 @@ pub fn parse_services(output: &str) -> Vec<ServiceInfo> {
                 description: fields.collect::<Vec<_>>().join(" "),
             })
         })
+        .collect()
+}
+
+/// 解析 systemctl show 的 key=value 属性输出。
+fn parse_properties(output: &str) -> std::collections::HashMap<String, String> {
+    output
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| (key.to_string(), value.to_string()))
         .collect()
 }
 
@@ -324,7 +562,7 @@ fn remote_failure(server_id: &str, command: &str, stderr: String) -> AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_ports, parse_processes, parse_services};
+    use super::{parse_lsof_ports, parse_ports, parse_processes, parse_services};
 
     #[test]
     fn parses_process_fixture() {
@@ -349,5 +587,14 @@ mod tests {
         let values = parse_services(include_str!("../../../../fixtures/systemd-services.txt"));
         assert_eq!(values[0].name, "nginx.service");
         assert_eq!(values[1].active, "failed");
+    }
+
+    #[test]
+    fn parses_lsof_fallback() {
+        let values = parse_lsof_ports(
+            "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\nnginx 88 root 6u IPv4 1 0t0 TCP *:8080 (LISTEN)",
+        );
+        assert_eq!(values[0].port, 8080);
+        assert_eq!(values[0].process_name.as_deref(), Some("nginx"));
     }
 }

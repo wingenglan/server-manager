@@ -4,7 +4,7 @@
 
 最后更新：2026-08-13（Asia/Shanghai）
 
-当前阶段：Milestone 0 已完成；Milestone 1–3 已实现主要代码但真实密码登录验收未完成；Milestone 4–7 尚未开始或未完成。
+当前阶段：Milestone 0 已完成；Milestone 1–3 的主要代码和本地交互已补齐，但真实密码登录验收未完成；Milestone 4 Tools/Nginx 与 Milestone 5–6 Docker 已接入 typed IPC、真实 CLI-over-SSH、exec/follow、资源生命周期、可取消的安装/pull/follow、Compose 服务/日志/默认脱敏 config、原始 YAML 显式编辑校验/失败恢复、逐项 cleanup、HTTPS 证书检查、后端探活、CPU/内存/重启策略和平台能力快照；真实服务器验收仍未完成；Milestone 7 已接入普通配置导入/导出、Argon2id+AES-256-GCM 完整备份、主题/恢复偏好、全局任务中心、脱敏诊断、审计和档案复制。
 
 交付分支：`main`，远程仓库 `git@github.com:wingenglan/server-manager.git`。
 
@@ -64,14 +64,15 @@ Windows 需要 Rust stable MSVC、Visual Studio Build Tools 的“使用 C++ 的
 
 - 代码不是 Mock：SSH、PTY、SFTP、系统探测、传输和运行现场均走 Rust + russh/russh-sftp 的真实路径。
 - 当前最大的证据缺口是没有通过产品 UI 使用密码登录测试机。未验证的 Milestone 1–3 项仍标为 `[~]`。
-- Tools、Nginx、Docker、备份/导入、诊断、主题/i18n、完整命令面板和最终安装包均未完成。
-- 最近全量基线：前端 lint/typecheck/build 通过，Vitest `7 passed`；Rust fmt/clippy 通过，Rust tests `14 passed`。
-- `pnpm tauri dev` 曾成功启动 Windows 桌面进程和 WebView。最近一次 `pnpm tauri build` 在 release 优化阶段被用户暂停，没有 bundle 或安装包，必须重跑。
+- Tools/Nginx 已有 registry、PlatformAdapter、配置 parser、证书到期元数据、HTTPS 文件存在性检查、后端探活、`nginx -T` 源文件聚合和 managed conf safety flow；Docker 已有 CLI-over-SSH 的 overview/container/image/log/follow/inspect/stats/top/exec/volume/network/pull/run、容器重命名/复制 ID/打开发布端口、日志筛选导出和 Compose project discovery、services/logs、默认脱敏 config、原始 YAML 显式编辑/校验/失败恢复、逐项 cleanup、容器资源限制字段；工具安装、pull、follow 支持取消远程 channel。仍缺真实服务器证据、完整翻译资源和真实更新通道；Windows x64 MSI/NSIS 安装包已生成。普通配置 JSON、Argon2id+AES-256-GCM 完整备份、全局任务中心、跨页面 toast、locale 偏好结构、更新预留入口、Tauri app log、脱敏诊断、审计记录与档案复制均已接入。
+- 本次增量已补 Docker 容器重命名/复制/发布端口、镜像删除、卷网络 inspect、日志 search/pause/clear/tail/copy/download、Inspect/Stats 搜索复制与短期采样、Compose start/stop/pull/build 和资源任务中心；Overview runtime 可打开 Docker/Nginx systemd 日志；Nginx `nginx -T` 聚合 include 源文件并可跳转 Files；设置页已补 locale、toast、app log 和更新预留入口。
+- 本次接手验证：前端 lint/typecheck/test/build、`git diff --check`、Rust fmt/check/clippy/test 均通过；`pnpm tauri build` 已生成 Windows x64 MSI/NSIS，release exe 已 smoke launch。详见 [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md)。
+- 安装包路径和 SHA-256 已记录在 [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md)；不要提交 `src-tauri/target/` 构建目录。
 - `src-tauri/target/` 曾约 11.6 GB，已被 `src-tauri/.gitignore` 排除。不要提交构建目录。
 
 ## 下一条推荐任务
 
-先在新电脑复现全量门禁，然后运行 `pnpm tauri dev`，通过 UI 添加上述测试机、核对 Host Key、完成密码连接，并验证 Overview、双终端、SFTP 只读浏览。发现问题先修 Milestone 1–3；真实基础链路稳定后再开始 Milestone 4 Tools + Nginx。完整顺序见 [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md)。
+下一步通过 UI 添加上述测试机、核对 Host Key、完成密码连接，验证 Overview、双终端、SFTP 只读浏览；基础链路通过后再验收 Tools、Nginx `-T`/HTTPS 探活、Docker read-only 与隔离资源写操作。随后补完整翻译资源、真实更新通道、macOS 包和全量 A-K 证据；Compose YAML 写回、有限退避重连、ss/lsof 回退、toast、locale 结构和 app log 已接入。完整顺序见 [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md)。
 
 ## 交接完成的判定
 

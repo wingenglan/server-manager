@@ -48,9 +48,9 @@
 已知边界：
 
 - 未用 Relay UI 在真实服务器完成 password auth 与终端验收。
-- reconnect 需要回 Overview 建立 SSH，再重开 tab；自动退避重连尚未实现。
-- Server group UI、最近连接视图、profile duplicate/export、SSH Agent/ProxyJump 尚未实现。
-- Sidebar 在线点目前主要表示选中态，不是所有服务器的实时后台探测结果。
+- Overview 的连接失败状态支持有限退避重连；终端在 SSH 断开后仍需用户点击“重开会话”，后台自动恢复终端尚未实现。
+- Server 分组、侧栏搜索、favorite/recent 排序、分组编辑和 profile duplicate 已接入；SSH Agent/ProxyJump 尚未实现；普通配置与加密完整备份已在设置页提供。
+- Sidebar 会每 15 秒读取本地 SSH 会话快照并显示 online/connecting/error/offline；它不会为所有服务器后台自动发起 SSH 连接。
 
 ### Milestone 2 — Files（主要实现，真实验收未闭环）
 
@@ -80,11 +80,11 @@
 已知边界：
 
 - 未在真实 SFTP server 验证浏览、传输、冲突、sudo 保存。
-- 上传选择器目前选文件；文件夹主要依赖拖放。需要增加明确的“选择文件夹上传”。
-- 同名冲突 Skip/Replace/Rename/Apply-to-all 尚未做；当前上传完成时 `mv -f`。
-- 远程拖出到任意系统目标未做，仅 Download；远端内部 Copy/Move UI 未做。
-- 大文件 viewer、图片预览、系统默认应用安全临时目录、chmod/symlink UI、Compare/Reload UI 未完成。
-- transfer retry/pause、全局任务持久化和关闭应用后的恢复未完成；取消已实现。
+- 已增加明确的“上传文件夹”选择器，并复用 Rust 传输层递归上传。
+- 同名冲突 Skip/Replace/Rename 已接入上传批次策略；当前选择会应用于该批次。
+- 远程拖出到任意系统目标未做，仅 Download；远端内部 Copy/Move、chmod、symlink 已接入并由后端验证。
+- 大文件 viewer 已支持通过远端 `tail` 展示有限尾部；图片预览、系统默认应用安全临时目录仍未完成；编辑器 Compare/Reload 已接入。
+- 传输中心已支持失败/取消任务重新提交；pause/resume、全局任务持久化和关闭应用后的恢复未完成；取消已实现。
 
 ### Milestone 3 — Overview / Processes / Ports / Services（主要实现，真实验收未闭环）
 
@@ -102,7 +102,7 @@
 
 - Overview 通过固定 Rust domain probe 读取 `/etc/os-release`、`/proc`、`df`、`ip`、systemctl、Docker/Nginx capability。
 - CPU 和 network 使用两个采样点计算；network 排除 loopback，不把累计字节伪装成速率。
-- hostname/OS/kernel/arch/user/remote time/timezone/IP/gateway/package manager/systemd、CPU/RAM/swap/load/disk、Docker/Nginx、failed units/listening count。
+- hostname/OS/kernel/arch/user/remote time/timezone/IP/gateway/package manager/systemd、CPU/RAM/swap/load/disk、Docker/Nginx、failed units/listening count；Overview runtime 卡片可在确认后启动/重启 Docker/Nginx 服务。
 - `ps -eo ...`、`ss -H -lntup`、`systemctl list-units` 强类型 parser 与 fixtures。
 - 页面统一搜索 port/PID/user/process/command/service，并按 ports/processes/services 分组展示。
 - 释放端口/结束进程：先展示对象，默认 SIGTERM，可显式选择 SIGKILL 或已配置 sudo；之后 `kill -0` + `ss` 验证。
@@ -111,39 +111,49 @@
 已知边界：
 
 - 未在真实服务器验收实时 Overview 或 8080 release 流程。
-- Overview 未显示 top CPU/memory processes、完整 mount 列表、virtualization、短期图表。
-- operations 进程表暂截前 300 行，尚未虚拟化；服务日志/detail/enable/disable 尚未做。
-- 非 root `ss` fallback、sudo rescan 与 `lsof` fallback 未完成。
+- Overview 已显示 top CPU/memory processes 和 mount 摘要；virtualization、短期图表尚未做。
+- operations 进程表暂截前 300 行，尚未虚拟化；systemd 服务 detail/logs/action/enable/disable 已接入，权限 fallback 尚未做。
+- 运行现场端口探测优先 `ss`，缺失时回退 `lsof`；页面可在明确勾选后以已配置 sudo 重扫。Overview 现在额外返回 OS Adapter、真实 command paths 和防火墙能力。
 
 ## 尚未实现的主要范围
 
-### Milestone 4 — Tools + Nginx
+### Milestone 4 — Tools + Nginx（代码已接入，真实验收未闭环）
 
-尚未实现：tool registry/detection/install plan、streaming install、capability refresh；Nginx `-T` source mapping/parser、reverse proxy list/wizard、backup/test/rollback/reload、日志与证书 metadata。
+- `src-tauri/src/domain/tools/mod.rs`：固定工具 registry，探测 installed/version/running/package manager，生成 apt/dnf 安装计划；安装由用户确认后执行并重新验证。
+- `src-tauri/src/domain/nginx/mod.rs`：解析 `nginx -T` 的 source marker、server/location/upstream/proxy_pass/listen/server_name，保留未知 directive warning 与源文件/行号；managed conf 仅在检测到 `/etc/nginx/conf.d/` include 时启用，写入走临时文件、备份、`nginx -t`、reload 和失败恢复。
+- 前端 `src/features/tools/ToolsPage.tsx`、`src/features/nginx/NginxPage.tsx` 已接入 typed IPC、loading/error/empty、确认和配置风险提示。
+- 当前缺口：工具安装已通过独立 SSH channel 流式回传 stdout/stderr，并支持取消远程 channel；Nginx HTTPS wizard/证书存在性、证书有效期元数据、后端连通性测试、`nginx -T` 源文件聚合已实现；配置文件可跳转到 Files/Monaco 编辑，完整 directive tree 和真实服务器验证仍未完成；TLS metadata 不读取私钥内容。
 
-### Milestone 5–6 — Docker
+### Milestone 5–6 — Docker（部分代码已接入，真实验收未闭环）
 
-尚未实现：Docker overview/containers/actions/logs/inspect/stats/exec；images/pull/run；volumes/networks；Compose discovery/config/apply；cleanup/builds/events。
+- `src-tauri/src/domain/docker/mod.rs`：CLI-over-SSH 的 Engine/container/image/volume/network JSON parser；容器生命周期动作、删除确认、inspect 状态验证、tail 日志、inspect/stats/top 只读查询、pull streaming 和受控 run。
+- 前端 `src/features/docker/DockerPage.tsx` 已提供容器/镜像列表、筛选、健康/创建时间/Compose/资源限制摘要、确认后的生命周期操作、重命名/复制 ID 与名称/打开发布端口、日志筛选/刷新/复制/下载/清空视图/tail、格式化 inspect/stats/top 搜索复制、Stats 短期 session 采样、pull/run 和 volume/network Inspect/create/delete。
+- Compose 原始 YAML 可从项目 config path 显式读取并编辑；保存前执行 `docker compose config -q`，失败自动恢复原文件；默认渲染配置仍脱敏只读；项目支持 up/start/stop/restart/pull/build/down。统一任务中心已覆盖文件传输、工具安装、Docker pull/follow，容器 snapshot 已补 restart policy/CPU limit/memory limit 字段；真实服务器验证仍未完成。
 
 ### Milestone 7 — Backup + Polish
 
-尚未实现：普通导出、Argon2id + AEAD credential backup/import；settings persistence、theme/light/i18n、完整 command palette、notifications/toasts/task center、diagnostics export、audit writes、update reservation、full packaging。
+- 已实现普通 JSON 导出/导入：`src-tauri/src/domain/server/mod.rs`、`src/features/settings/SettingsPage.tsx`；只导出非敏感配置，导入生成新 ID，密码/私钥内容/sudo 凭据不出 Keychain。
+- 已补 locale 偏好和文档 `lang` 属性结构、跨页面通知 toast、Tauri app log（每次启动写入 app log 目录的 `relay.log`）、更新能力预留入口；完整翻译资源、真实更新通道和 full packaging 仍未完成。设置页已补 About/version；统一任务中心已覆盖文件传输、工具安装、Docker pull/follow 和 Compose/资源动作元数据；脱敏 diagnostics export、audit writes、档案 duplicate、Compose YAML 安全写回、Argon2id + AES-256-GCM 完整备份与主题/连接恢复偏好已接入。
 
 ## 自动化与手工证据
 
-最后一次全量通过（2026-08-13）：
+本次接手后的可复现结果（2026-08-13）：
 
 ```text
+pnpm install --frozen-lockfile    PASS (pnpm 10.28.2; 331 packages)
 pnpm lint                         PASS
 pnpm typecheck                    PASS
-pnpm test --run                   PASS (7 tests)
-pnpm build                        PASS (route chunks generated)
-cargo fmt --all -- --check        PASS
-cargo clippy ... -- -D warnings   PASS
-cargo test --all-features         PASS (14 tests)
+pnpm test --run                   PASS (4 files, 7 tests)
+pnpm build                        PASS (Vite 7.3.6)
+cargo fmt --check                 PASS (Rust stable 1.97.1 / rustfmt 1.9)
+cargo check --all-targets ...     PASS (MSVC 14.44.35207 + Windows SDK 10.0.26100.0)
+cargo clippy --all-targets ...    PASS (-D warnings)
+cargo test --all-features        PASS (28 tests, 0 failed; NASM 3.02)
+pnpm tauri build                  PASS (x64 MSI + NSIS)
+git diff --check                  PASS
 ```
 
-前端 route chunks：main 约 376 KB、Files 约 120 KB、Terminal 约 369 KB、Operations 约 9 KB（未压缩，具体 hash 会变化）。
+前端 production bundle 已由本次变更重新生成；Rust 已在 MSVC/Windows SDK/NASM 完整环境中通过 check、clippy、test，Tauri release 安装包也已生成。
 
 截图：`docs/screenshots/milestone-0-*.png`，是空服务器/add dialog/compact QA，不代表后续功能真实验收。
 
@@ -151,21 +161,31 @@ cargo test --all-features         PASS (14 tests)
 
 ## Build/packaging 状态
 
-- `pnpm tauri dev`：成功启动过 Windows desktop process + WebView。
-- `pnpm tauri build`：最近一次在 release 优化阶段被用户主动暂停；没有 `src-tauri/target/release/bundle/` 或可交付安装包。
-- 新环境必须重跑 build。完成后将 bundle 路径和 SHA-256 写入本文与 `ACCEPTANCE.md`。
+- 构建环境：Visual Studio Build Tools 2022 17.14.37，MSVC 14.44.35207，Windows SDK 10.0.26100.0，NASM 3.02，Rust 1.97.1，pnpm 10.28.2，Node 23.11.1。
+- `pnpm tauri build`：通过；主程序 `src-tauri/target/release/agentless-server-manager.exe` 已成功生成并 smoke launch。
+- NSIS 安装包：[agentless-server-manager_0.1.0_x64-setup.exe](../src-tauri/target/release/bundle/nsis/agentless-server-manager_0.1.0_x64-setup.exe)，6,153,065 bytes，SHA-256 `C5822C1C7729926A391FD9D00683D368FC0345A0CF0939376AE676BCF8DA4FD0`。
+- MSI 安装包：[agentless-server-manager_0.1.0_x64_en-US.msi](../src-tauri/target/release/bundle/msi/agentless-server-manager_0.1.0_x64_en-US.msi)，8,974,336 bytes，SHA-256 `3C7D5144BCE870BD8CB40F3A1E9955BADB7BE9913369849D9842FE8F25D4FF23`。
+- release 主程序：24,536,064 bytes，SHA-256 `BACD8EBBEF20A8933F5D65E68A90B60360324589AC30FFE269C07E8415CE2AE6`。
+
+## 本次工作验证状态
+
+- `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm typecheck`、`pnpm test --run`、`pnpm build`：均通过。
+- Rust stable 1.97.1 已安装；`cargo fmt --check` 通过。
+- `cargo check --all-targets --all-features`、严格 Clippy、`cargo test --all-features` 均通过；原始 release exe 已验证进程成功启动并关闭。
+- `git diff --check`：通过；Git 输出的 LF→CRLF 是工作区换行提示，不是 diff 错误。
 
 ## Git 检查点
 
 - `e918cef feat: build secure SSH operations foundation`
 - `17c32e6 feat: add files transfers and runtime operations`
-- 本次交接文档会再生成一个 commit；以远程 `main` 最新 log 为准。
+- 本次接手未创建 commit；实现与文档改动保留在工作区，提交前请先审阅 `git status`。
 
 ## 需优先审计的技术债
 
 1. `AppError` 使用 crate-level `clippy::result_large_err` 豁免；这是为了 IPC 结构化错误，后续可评估 Box，但不要无理由破坏序列化形状。
 2. `security::redact` 是基础 marker redaction，尚非完整 secret-aware tracing layer。
-3. Remote command abstraction 仍以固定 domain-generated command string 为核心，未形成主需求完整 `RemoteCommandRequest`、stream/cancel 类型。
-4. `audit_events` 表已建但业务动作尚未写审计记录。
-5. Tauri capability 为 core + dialog open/save；每加插件都需最小 scope 审计。
-6. CI 声明 Windows/macOS，但尚未在 GitHub Actions 远程实际观察结果；push 后立即查看首轮 CI。
+3. Remote command abstraction 仍以固定 domain-generated command string 为核心，未形成主需求完整 `RemoteCommandRequest`、统一 task progress 类型；安装/pull/follow 已有 stream/cancel。
+4. Tool/Docker 流式任务已有 task id、取消 endpoint、SSH channel close 和全局任务中心；文件传输/命令任务元数据仍为进程内状态，持久化进度与关闭应用后的恢复尚未做。
+5. `audit_events` 已由服务器档案、连接、文件、服务、工具、Nginx 和 Docker 变更命令写入；仍需真实 UI 验证审计展示与脱敏导出。
+6. Tauri capability 为 core + dialog open/save；每加插件都需最小 scope 审计。
+7. CI 声明 Windows/macOS，但尚未在 GitHub Actions 远程实际观察结果；push 后立即查看首轮 CI。

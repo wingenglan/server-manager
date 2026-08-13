@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, ShieldCheck, X } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -31,6 +31,7 @@ function formFor(profile?: ServerProfile | null): SaveServerInput {
     authType: profile.authType,
     privateKeyPath: profile.privateKeyPath ?? undefined,
     sudoMode: profile.sudoMode,
+    groupId: profile.groupId ?? undefined,
     tags: profile.tags,
     favorite: profile.favorite,
   };
@@ -39,6 +40,7 @@ function formFor(profile?: ServerProfile | null): SaveServerInput {
 export function ServerDialog({ open, onOpenChange, profile }: Props) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const groups = useQuery({ queryKey: ["server-groups"], queryFn: api.listServerGroups });
   const [form, setForm] = useState(() => formFor(profile));
   const [showSecret, setShowSecret] = useState(false);
   const mutation = useMutation({
@@ -87,6 +89,7 @@ export function ServerDialog({ open, onOpenChange, profile }: Props) {
               <label><span>sudo 模式</span><select value={form.sudoMode} onChange={(e) => set("sudoMode", e.target.value as SudoMode)}><option value="none">不使用 sudo</option><option value="passwordless">免密 sudo</option><option value="password">使用 sudo 密码</option></select></label>
               {form.sudoMode === "password" && <label><span>sudo 密码</span><input type="password" value={form.sudoPassword ?? ""} onChange={(e) => set("sudoPassword", e.target.value)} autoComplete="new-password" /></label>}
             </div>
+            <label><span>服务器分组</span><select value={form.groupId ?? ""} onChange={(e) => set("groupId", e.target.value || undefined)}><option value="">未分组</option>{groups.data?.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label>
             <label className="check-field"><input type="checkbox" checked={form.favorite} onChange={(event) => set("favorite", event.target.checked)} /><span>加入收藏并置顶显示</span></label>
             <div className="security-note"><ShieldCheck size={18} /><span><strong>Host Key 校验默认开启</strong>首次连接会显示指纹，只有确认信任后才会认证。</span></div>
             {mutation.error && <div className="form-error">{errorMessage(mutation.error)}</div>}

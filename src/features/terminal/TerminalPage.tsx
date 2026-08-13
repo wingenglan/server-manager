@@ -24,6 +24,7 @@ function decodeBase64(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+/** 管理基于 SSH 的多标签交互终端，并同步远端终端事件。 */
 export function TerminalPage() {
   const { serverId = "" } = useParams();
   const profile = useQuery({ queryKey: ["server", serverId], queryFn: () => api.getServer(serverId) });
@@ -69,7 +70,7 @@ export function TerminalPage() {
       <div><div className="breadcrumb">服务器 / {profile.data?.name ?? "…"} / <span>终端</span></div><h1>SSH 终端</h1><p>{profile.data ? `${profile.data.username}@${profile.data.host}` : "正在载入"}</p></div>
       <div className="workspace-header__actions"><span className={`connection-pill ${connection.data?.status === "online" ? "is-online" : ""}`}><i /> {connection.data?.status === "online" ? `${tabs.length} 个交互会话` : "SSH 已断开"}</span></div>
     </div>
-    <nav className="workspace-tabs"><NavLink end to={`/servers/${serverId}`}>概览</NavLink><NavLink to={`/servers/${serverId}/files`}>文件</NavLink><NavLink className="active" to={`/servers/${serverId}/terminal`}>终端</NavLink><NavLink to={`/servers/${serverId}/operations`}>端口与进程</NavLink><button disabled>服务</button><button disabled>Nginx</button><button disabled>Docker</button></nav>
+    <nav className="workspace-tabs"><NavLink end to={`/servers/${serverId}`}>概览</NavLink><NavLink to={`/servers/${serverId}/files`}>文件</NavLink><NavLink className="active" to={`/servers/${serverId}/terminal`}>终端</NavLink><NavLink to={`/servers/${serverId}/operations`}>端口与进程</NavLink><NavLink to={`/servers/${serverId}/services`}>服务</NavLink><NavLink to={`/servers/${serverId}/tools`}>工具</NavLink><NavLink to={`/servers/${serverId}/nginx`}>Nginx</NavLink><NavLink to={`/servers/${serverId}/docker`}>Docker</NavLink></nav>
     <div className="terminal-workspace">
       <div className="terminal-tabbar">
         <div className="terminal-tabs">

@@ -88,6 +88,8 @@ impl Drop for TransferGuard {
     }
 }
 
+/// 上传本地文件或文件夹到远程目录，并按冲突策略完成原子替换。
+#[allow(clippy::too_many_arguments)]
 pub async fn upload(
     manager: &TransferManager,
     ssh: &SshConnectionManager,
@@ -95,8 +97,10 @@ pub async fn upload(
     server_id: &str,
     local_path: &str,
     remote_directory: &str,
+    conflict: &str,
     events: &Channel<TransferEvent>,
 ) -> AppResult<()> {
+    validate_conflict(conflict)?;
     let guard = manager.begin(transfer_id)?;
     let local_root = PathBuf::from(local_path);
     let metadata = tokio::fs::metadata(&local_root).await.map_err(|error| {
@@ -130,6 +134,7 @@ pub async fn upload(
             server_id,
             &local_root,
             &remote_root,
+            conflict,
             events,
             &mut transferred,
             started,
@@ -143,6 +148,7 @@ pub async fn upload(
             server_id,
             &local_root,
             &remote_root,
+            conflict,
             events,
             &mut transferred,
             total,
@@ -178,6 +184,7 @@ async fn upload_directory(
     server_id: &str,
     local_root: &Path,
     remote_root: &str,
+    conflict: &str,
     events: &Channel<TransferEvent>,
     transferred: &mut u64,
     started: Instant,
@@ -215,6 +222,7 @@ async fn upload_directory(
                     server_id,
                     &entry.path(),
                     &remote_path,
+                    conflict,
                     events,
                     transferred,
                     size,
@@ -235,11 +243,15 @@ async fn upload_file(
     server_id: &str,
     local_path: &Path,
     remote_path: &str,
+    conflict: &str,
     events: &Channel<TransferEvent>,
     transferred: &mut u64,
     total: Option<u64>,
     started: Instant,
 ) -> AppResult<()> {
+    let Some(remote_path) = resolve_conflict(sftp, remote_path, conflict).await? else {
+        return Ok(());
+    };
     let temporary = format!("{remote_path}.relay-{}.part", uuid::Uuid::new_v4());
     let mut source = tokio::fs::File::open(local_path).await.map_err(|error| {
         AppError::new("LOCAL_FILE_FAILED", "file", "无法打开本地文件").details(error)
@@ -268,7 +280,7 @@ async fn upload_file(
                 .for_server(server_id)
         })?;
         *transferred += count as u64;
-        progress(events, guard, *transferred, total, started, remote_path)?;
+        progress(events, guard, *transferred, total, started, &remote_path)?;
     }
     target.flush().await.map_err(|error| {
         AppError::new("SFTP_FAILED", "sftp", "远程上传刷新失败")
@@ -287,7 +299,7 @@ async fn upload_file(
             &format!(
                 "mv -f -- {} {}",
                 shell_escape(&temporary),
-                shell_escape(remote_path)
+                shell_escape(&remote_path)
             ),
             Duration::from_secs(30),
         )
@@ -301,6 +313,49 @@ async fn upload_file(
         );
     }
     Ok(())
+}
+
+/// 校验上传冲突策略，默认行为由前端显式选择而不是隐藏在 Rust 命令中。
+fn validate_conflict(conflict: &str) -> AppResult<()> {
+    if matches!(conflict, "replace" | "skip" | "rename") {
+        Ok(())
+    } else {
+        Err(AppError::new(
+            "VALIDATION_FAILED",
+            "validation",
+            "文件冲突策略无效",
+        ))
+    }
+}
+
+/// 根据冲突策略决定覆盖、跳过或生成不冲突的远程文件名。
+async fn resolve_conflict(
+    sftp: &SftpSession,
+    remote_path: &str,
+    conflict: &str,
+) -> AppResult<Option<String>> {
+    let exists = sftp.symlink_metadata(remote_path).await.is_ok();
+    if !exists || conflict == "replace" {
+        return Ok(Some(remote_path.to_string()));
+    }
+    if conflict == "skip" {
+        return Ok(None);
+    }
+    let (stem, extension) = remote_path
+        .rsplit_once('.')
+        .map(|(stem, extension)| (stem.to_string(), format!(".{extension}")))
+        .unwrap_or_else(|| (remote_path.to_string(), String::new()));
+    for index in 1..=999 {
+        let candidate = format!("{stem} ({index}){extension}");
+        if sftp.symlink_metadata(&candidate).await.is_err() {
+            return Ok(Some(candidate));
+        }
+    }
+    Err(AppError::new(
+        "CONFLICT_UNRESOLVED",
+        "file",
+        "无法为冲突文件生成新名称",
+    ))
 }
 
 pub async fn download(

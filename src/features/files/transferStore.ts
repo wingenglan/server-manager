@@ -11,6 +11,7 @@ export interface TransferTask {
   bytesPerSecond: number;
   currentPath: string;
   error?: string;
+  retry?: () => void;
 }
 
 interface TransferState {

@@ -29,3 +29,5 @@ React 不传裸 shell。各 domain service 构建固定 program 与经过 POSIX 
 ## 前端
 
 前端按 feature 切分，TanStack Query 管理远端状态，Zustand 仅管理 UI session，Radix 提供可访问交互原语。列表达到大数据量时使用 TanStack Virtual；终端和日志使用 Tauri Channel/Event 流式传输。
+
+Tools、Nginx 和 Docker 当前也遵循同一 Rust boundary：工具 registry 生成固定包管理命令，Nginx parser 消费 `nginx -T` 并只返回结构化 proxy/source mapping，前端不接触裸 shell 或 Docker socket；Docker 通过 SSH 执行远程 CLI 的 JSON 输出。

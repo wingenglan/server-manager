@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "agentless-server-manager",
-  "version": "0.1.0",
+  "version": "0.2.3",
   "identifier": "com.agentless.servermanager",
   "build": {
     "beforeDevCommand": "pnpm dev",

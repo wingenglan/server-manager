@@ -1,6 +1,12 @@
+pub mod backup;
+pub mod diagnostics;
+pub mod docker;
 pub mod files;
 pub mod metrics;
+pub mod nginx;
 pub mod operations;
+pub mod platform;
 pub mod server;
 pub mod ssh;
+pub mod tools;
 pub mod transfer;

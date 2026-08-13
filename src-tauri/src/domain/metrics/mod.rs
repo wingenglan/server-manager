@@ -1,3 +1,4 @@
+use crate::domain::platform::ServerCapabilities;
 use crate::domain::ssh::SshConnectionManager;
 use crate::errors::{AppError, AppResult};
 use serde::Serialize;
@@ -24,9 +25,12 @@ sleep 0.25
 printf '__CPU_B__\n'; head -n1 /proc/stat 2>/dev/null || true
 printf '__NET_B__\n'; cat /proc/net/dev 2>/dev/null || true
 printf '__COUNTS__\n'; systemctl --failed --type=service --no-legend --no-pager 2>/dev/null | wc -l; ss -H -lntu 2>/dev/null | wc -l
+printf '__TOP_PROCESSES__\n'; ps -eo pid=,comm=,pcpu=,pmem=,args= --sort=-pcpu 2>/dev/null | head -n 6 || true
+printf '__MOUNTS__\n'; if command -v findmnt >/dev/null 2>&1; then findmnt -rn -o TARGET,SOURCE,FSTYPE,OPTIONS 2>/dev/null; else cat /proc/mounts 2>/dev/null; fi
 printf '__DOCKER__\n'; if command -v docker >/dev/null 2>&1; then printf 'installed\t'; docker version --format '{{.Server.Version}}' 2>/dev/null || docker --version 2>/dev/null || true; if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet docker 2>/dev/null; then printf 'running\n'; else printf 'stopped\n'; fi; else printf 'missing\n'; fi
 printf '__NGINX__\n'; if command -v nginx >/dev/null 2>&1; then printf 'installed\t'; nginx -v 2>&1 | sed 's#nginx version: nginx/##'; if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet nginx 2>/dev/null; then printf 'running\n'; else printf 'stopped\n'; fi; else printf 'missing\n'; fi
-printf '__CAPABILITIES__\n'; for name in systemctl sudo docker nginx ss ip journalctl lsof tar gzip; do if command -v "$name" >/dev/null 2>&1; then printf '%s=1\n' "$name"; else printf '%s=0\n' "$name"; fi; done
+printf '__CAPABILITIES__\n'; for name in systemctl sudo docker nginx ss ip journalctl lsof tar gzip ufw firewalld nft; do if command -v "$name" >/dev/null 2>&1; then printf '%s=1\n' "$name"; else printf '%s=0\n' "$name"; fi; done
+printf '__COMMAND_PATHS__\n'; for name in systemctl sudo docker nginx ss ip journalctl lsof tar gzip ufw firewalld nft; do path=$(command -v "$name" 2>/dev/null || true); if [ -n "$path" ]; then printf '%s=%s\n' "$name" "$path"; fi; done
 "#;
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,9 +62,12 @@ pub struct SystemOverview {
     pub failed_services: u32,
     pub listening_ports: u32,
     pub disks: Vec<DiskUsage>,
+    pub top_processes: Vec<TopProcess>,
+    pub mounts: Vec<MountInfo>,
     pub docker: RuntimeStatus,
     pub nginx: RuntimeStatus,
     pub capabilities: HashMap<String, bool>,
+    pub server_capabilities: ServerCapabilities,
     pub sampled_at: String,
 }
 
@@ -71,6 +78,25 @@ pub struct DiskUsage {
     pub total_bytes: u64,
     pub used_bytes: u64,
     pub usage_percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopProcess {
+    pub pid: u32,
+    pub name: String,
+    pub cpu_percent: f64,
+    pub memory_percent: f64,
+    pub command: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MountInfo {
+    pub mount: String,
+    pub source: String,
+    pub filesystem: String,
+    pub options: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -115,6 +141,12 @@ pub fn parse_overview(output: &str) -> AppResult<SystemOverview> {
         section(&sections, "NET_A"),
         section(&sections, "NET_B"),
         0.25,
+    );
+    let capabilities = parse_capabilities(section(&sections, "CAPABILITIES"));
+    let server_capabilities = ServerCapabilities::from_probe(
+        platform.first().copied().unwrap_or("unknown"),
+        &capabilities,
+        parse_command_paths(section(&sections, "COMMAND_PATHS")),
     );
     Ok(SystemOverview {
         hostname: first_line(section(&sections, "HOSTNAME"))
@@ -168,9 +200,12 @@ pub fn parse_overview(output: &str) -> AppResult<SystemOverview> {
         failed_services: *counts.first().unwrap_or(&0),
         listening_ports: *counts.get(1).unwrap_or(&0),
         disks: parse_df(section(&sections, "DF")),
+        top_processes: parse_top_processes(section(&sections, "TOP_PROCESSES")),
+        mounts: parse_mounts(section(&sections, "MOUNTS")),
         docker: parse_runtime(section(&sections, "DOCKER")),
         nginx: parse_runtime(section(&sections, "NGINX")),
-        capabilities: parse_capabilities(section(&sections, "CAPABILITIES")),
+        capabilities,
+        server_capabilities,
         sampled_at: chrono::Utc::now().to_rfc3339(),
     })
 }
@@ -299,6 +334,39 @@ pub fn parse_df(input: &str) -> Vec<DiskUsage> {
         .collect()
 }
 
+/// 解析远程 ps 排序结果，最多保留探测脚本返回的前五个进程。
+pub fn parse_top_processes(input: &str) -> Vec<TopProcess> {
+    input
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            Some(TopProcess {
+                pid: fields.next()?.parse().ok()?,
+                name: fields.next()?.into(),
+                cpu_percent: fields.next()?.parse().unwrap_or(0.0),
+                memory_percent: fields.next()?.parse().unwrap_or(0.0),
+                command: fields.collect::<Vec<_>>().join(" "),
+            })
+        })
+        .collect()
+}
+
+/// 解析 findmnt 或 /proc/mounts 的四列摘要，跳过格式不完整的行。
+pub fn parse_mounts(input: &str) -> Vec<MountInfo> {
+    input
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            (fields.len() >= 4).then(|| MountInfo {
+                mount: fields[0].into(),
+                source: fields[1].into(),
+                filesystem: fields[2].into(),
+                options: fields[3].into(),
+            })
+        })
+        .collect()
+}
+
 fn parse_runtime(input: &str) -> RuntimeStatus {
     let value = input.trim();
     if value.starts_with("missing") {
@@ -329,6 +397,16 @@ fn parse_capabilities(input: &str) -> HashMap<String, bool> {
         .lines()
         .filter_map(|line| line.split_once('='))
         .map(|(name, value)| (format!("has_{}", name), value == "1"))
+        .collect()
+}
+
+/// 解析 command -v 返回的真实远端命令路径，不根据发行版猜测位置。
+fn parse_command_paths(input: &str) -> HashMap<String, String> {
+    input
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .filter(|(_, path)| !path.trim().is_empty())
+        .map(|(name, path)| (name.to_string(), path.trim().to_string()))
         .collect()
 }
 
