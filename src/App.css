@@ -199,6 +199,12 @@ kbd { display: flex; align-items: center; gap: 3px; padding: 3px 6px; color: #a1
 .terminal-tab { width: 190px; min-width: 145px; display: flex; align-items: center; gap: 8px; padding: 0 10px; color: #83908d; border-right: 1px solid #26302f; font-size: 10px; }
 .terminal-tab.active { color: #dde5e2; background: #0b1011; box-shadow: inset 0 2px var(--accent); }
 .terminal-tab span { flex: 1; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-tab .terminal-tab__history { flex: 0 0 20px; display: grid; place-items: center; width: 20px; height: 20px; color: #65716e; border-radius: 5px; }
+.terminal-tab .terminal-tab__history:hover { color: var(--hover-text); background: var(--hover-surface); }
+.terminal-tab .terminal-tab__shortcut { flex: 0 0 20px; display: grid; place-items: center; width: 20px; height: 20px; color: #65716e; border-radius: 5px; }
+.terminal-tab .terminal-tab__shortcut.is-on { color: var(--accent); }
+.terminal-tab .terminal-tab__shortcut.is-off { color: var(--muted); opacity: .7; }
+.terminal-tab .terminal-tab__shortcut:hover { color: var(--hover-text); background: var(--hover-surface); }
 .terminal-tab input { min-width: 0; flex: 1; height: 23px; padding: 0 5px; color: var(--text); border: 1px solid #4b5c58; outline: none; background: #090d0e; font-size: 10px; }
 .terminal-rename { opacity: 0; }.terminal-tab:hover .terminal-rename { opacity: .65; }
 .terminal-add { width: 38px; display: grid; place-items: center; color: #77827f; border-right: 1px solid #26302f; }
@@ -532,13 +538,48 @@ html, body, #root { color: var(--text); background: var(--bg); font-size: 15px; 
 .shortcut-form select { height: 38px; }
 .shortcut-check { display: flex; align-items: center; gap: 8px; color: var(--text-soft); font-size: 11px; }
 .shortcut-check input { width: 15px; min-height: 15px; accent-color: var(--accent); }
-.terminal-shortcut-popover { position: absolute; z-index: 8; left: 18px; right: 18px; bottom: 22px; display: grid; gap: 2px; max-height: 260px; overflow: auto; padding: 6px; border: 1px solid var(--hover-border); border-radius: 10px; background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: var(--shadow-strong); backdrop-filter: blur(10px); }
-.terminal-shortcut-popover button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; padding: 9px 11px; color: var(--text); border: 0; border-radius: 7px; background: transparent; text-align: left; cursor: pointer; }
+.terminal-shortcut-popover { position: absolute; z-index: 8; top: 14px; right: 14px; width: min(680px, calc(100% - 28px)); display: grid; gap: 2px; max-height: min(310px, calc(100% - 28px)); overflow: hidden; padding: 7px; border: 1px solid var(--hover-border); border-radius: 10px; background: color-mix(in srgb, var(--panel) 96%, transparent); box-shadow: var(--shadow-strong); backdrop-filter: blur(10px); }
+.terminal-shortcut-popover__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 5px 7px; border-bottom: 1px solid var(--line-soft); }
+.terminal-shortcut-popover__header > div:first-child { min-width: 0; }
+.terminal-shortcut-popover__header strong, .terminal-shortcut-popover__header small { display: block; }
+.terminal-shortcut-popover__header strong { color: var(--text-strong); font-size: 11px; }
+.terminal-shortcut-popover__header small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.terminal-shortcut-popover__actions { display: flex; flex: 0 0 auto; gap: 4px; }
+.terminal-shortcut-popover__actions button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; color: var(--text-soft); border: 1px solid var(--line); border-radius: 5px; background: var(--surface); cursor: pointer; font-size: 9px; }
+.terminal-shortcut-popover__actions button:hover { color: var(--hover-text); border-color: var(--hover-border); background: var(--hover-surface); }
+.terminal-shortcut-popover__list { display: grid; gap: 2px; min-height: 0; overflow: auto; padding-top: 4px; }
+.terminal-shortcut-popover__list button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; padding: 9px 11px; color: var(--text); border: 0; border-radius: 7px; background: transparent; text-align: left; cursor: pointer; }
 .terminal-shortcut-popover button:hover, .terminal-shortcut-popover button.is-selected { color: var(--hover-text); background: var(--hover-surface); }
 .terminal-shortcut-popover strong, .terminal-shortcut-popover code, .terminal-shortcut-popover small { display: block; }
 .terminal-shortcut-popover strong { font-size: 12px; }
 .terminal-shortcut-popover code { margin-top: 4px; overflow: hidden; color: var(--text-soft); font: 11px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .terminal-shortcut-popover small { align-self: center; color: var(--muted); font-size: 11px; }
+.terminal-shortcut-popover small b { color: var(--accent); font-weight: 600; }
+.terminal-history-panel { position: absolute; z-index: 10; top: 12px; right: 12px; width: min(360px, calc(100% - 24px)); max-height: calc(100% - 24px); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--hover-border); border-radius: 10px; background: color-mix(in srgb, var(--panel) 98%, transparent); box-shadow: var(--shadow-strong); }
+.terminal-history-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 12px; border-bottom: 1px solid var(--line); }
+.terminal-history-panel > header > div { min-width: 0; }
+.terminal-history-panel > header strong, .terminal-history-panel > header small { display: block; }
+.terminal-history-panel > header strong { color: var(--text-strong); font-size: 12px; }
+.terminal-history-panel > header small { margin-top: 3px; color: var(--muted); font-size: 9px; }
+.terminal-history-panel > header button { display: grid; place-items: center; padding: 4px; color: var(--muted); border: 0; border-radius: 5px; background: transparent; cursor: pointer; }
+.terminal-history-panel > header button:hover { color: var(--hover-text); background: var(--hover-surface); }
+.terminal-history-panel__actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; color: var(--muted); border-bottom: 1px solid var(--line-soft); font-size: 9px; }
+.terminal-history-panel__actions button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 7px; color: var(--text-soft); border: 1px solid var(--line); border-radius: 5px; background: var(--surface); cursor: pointer; font-size: 9px; }
+.terminal-history-panel__actions button:hover { color: var(--hover-text); border-color: var(--hover-border); background: var(--hover-surface); }
+.terminal-history-list { min-height: 0; overflow: auto; padding: 5px; }
+.terminal-history-list > button { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 9px; width: 100%; padding: 8px 7px; color: var(--text-soft); border: 1px solid transparent; border-radius: 6px; background: transparent; cursor: pointer; text-align: left; }
+.terminal-history-list > button:hover { color: var(--hover-text); border-color: var(--hover-border); background: var(--hover-surface); }
+.terminal-history-list code { min-width: 0; overflow: hidden; color: inherit; font: 10px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.terminal-history-list small { color: var(--muted); font-size: 9px; }
+.terminal-history-list > button > span { color: var(--accent); font-size: 9px; }
+.terminal-history-empty { padding: 26px 15px; color: var(--muted); text-align: center; font-size: 10px; line-height: 1.6; }
+.shortcut-group { display: grid; gap: 7px; }
+.shortcut-group + .shortcut-group { margin-top: 8px; }
+.shortcut-group > header { display: flex; align-items: center; justify-content: space-between; padding: 3px 3px 0; }
+.shortcut-group > header strong { color: var(--text-strong); font-size: 12px; }
+.shortcut-group > header span { color: var(--muted); font-size: 10px; }
+.shortcut-group-filter { width: 120px; height: 38px; padding: 0 8px; color: var(--text-soft); border: 1px solid var(--line); border-radius: 8px; outline: 0; background: var(--surface); font-size: 11px; }
+.shortcut-group-filter:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
 .terminal-variable-popover { position: absolute; z-index: 9; left: 50%; top: 50%; width: min(380px, calc(100% - 32px)); display: grid; gap: 12px; padding: 18px; border: 1px solid var(--hover-border); border-radius: 12px; background: var(--panel); box-shadow: var(--shadow-strong); transform: translate(-50%, -50%); }
 .terminal-variable-popover > div:first-child { display: flex; align-items: center; justify-content: space-between; color: var(--text-strong); }
 .terminal-variable-popover > div:first-child button { display: grid; padding: 4px; color: var(--muted); border: 0; background: transparent; cursor: pointer; }
@@ -850,3 +891,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .editor-actions { overflow-x: auto; }
   .file-feedback { margin-left: 16px; margin-right: 16px; }
 }
+
+@media (max-width: 680px) {
+  .terminal-shortcut-popover { top: 8px; right: 8px; width: calc(100% - 16px); max-height: min(300px, calc(100% - 16px)); }
+  .terminal-shortcut-popover__header { align-items: flex-start; flex-direction: column; }
+  .terminal-shortcut-popover__actions { width: 100%; }
+  .terminal-shortcut-popover__actions button { flex: 1; justify-content: center; }
+  .terminal-history-panel { top: 8px; right: 8px; width: calc(100% - 16px); max-height: calc(100% - 16px); }
+  .shortcut-toolbar { flex-wrap: wrap; }
+  .shortcut-toolbar label { flex-basis: 100%; }
+  .shortcut-group-filter { flex: 1; }
+}
+
+/* Keep suggestion header controls compact after the generic suggestion button rules. */
+.terminal-shortcut-popover .terminal-shortcut-popover__header strong { font-size: 11px; }
+.terminal-shortcut-popover .terminal-shortcut-popover__header small { margin-top: 3px; font-size: 9px; }
+.terminal-shortcut-popover .terminal-shortcut-popover__actions button:hover { color: var(--hover-text); border-color: var(--hover-border); background: var(--hover-surface); }

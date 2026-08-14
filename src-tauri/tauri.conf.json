@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "agentless-server-manager",
+  "productName": "server-manager",
   "version": "0.3.0",
   "identifier": "com.agentless.servermanager",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Relay · Agentless Server Manager",
+        "title": "Relay · Server Manager",
         "width": 1440,
         "height": 900,
         "minWidth": 980,

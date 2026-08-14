@@ -36,13 +36,13 @@ impl LocalRepository {
     /// Lists global shortcuts and server-specific overrides, hiding a global item when the server has the same name.
     pub async fn list_shortcuts(&self, server_id: Option<&str>) -> AppResult<Vec<ShortcutRecord>> {
         let rows = if let Some(server_id) = server_id {
-            sqlx::query_as::<_, ShortcutRow>("SELECT id,scope,server_id,name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at FROM command_shortcuts WHERE scope='global' OR server_id=? ORDER BY CASE WHEN scope='server' THEN 0 ELSE 1 END, usage_count DESC, name COLLATE NOCASE")
+            sqlx::query_as::<_, ShortcutRow>("SELECT id,scope,server_id,name,group_name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at FROM command_shortcuts WHERE scope='global' OR server_id=? ORDER BY CASE WHEN scope='server' THEN 0 ELSE 1 END, group_name COLLATE NOCASE, usage_count DESC, name COLLATE NOCASE")
                 .bind(server_id)
                 .fetch_all(&self.pool)
                 .await
                 .map_err(AppError::database)?
         } else {
-            sqlx::query_as::<_, ShortcutRow>("SELECT id,scope,server_id,name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at FROM command_shortcuts WHERE scope='global' ORDER BY usage_count DESC, name COLLATE NOCASE")
+            sqlx::query_as::<_, ShortcutRow>("SELECT id,scope,server_id,name,group_name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at FROM command_shortcuts WHERE scope='global' ORDER BY group_name COLLATE NOCASE, usage_count DESC, name COLLATE NOCASE")
                 .fetch_all(&self.pool)
                 .await
                 .map_err(AppError::database)?
@@ -72,11 +72,13 @@ impl LocalRepository {
         let now = Utc::now();
         let tags = normalize_tags(input.tags);
         let tags_json = serde_json::to_string(&tags).map_err(AppError::database)?;
-        sqlx::query("INSERT INTO command_shortcuts (id,scope,server_id,name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,server_id=excluded.server_id,name=excluded.name,command_template=excluded.command_template,description=excluded.description,tags_json=excluded.tags_json,enabled=excluded.enabled,updated_at=excluded.updated_at")
+        let group_name = normalize_group_name(&input.group_name);
+        sqlx::query("INSERT INTO command_shortcuts (id,scope,server_id,name,group_name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET scope=excluded.scope,server_id=excluded.server_id,name=excluded.name,group_name=excluded.group_name,command_template=excluded.command_template,description=excluded.description,tags_json=excluded.tags_json,enabled=excluded.enabled,updated_at=excluded.updated_at")
             .bind(&id)
             .bind(input.scope.as_str())
             .bind(input.server_id.as_deref())
             .bind(input.name.trim())
+            .bind(group_name)
             .bind(input.command_template.trim())
             .bind(input.description.trim())
             .bind(tags_json)
@@ -201,7 +203,7 @@ impl LocalRepository {
 
     /// Fetches one shortcut record and converts its stored JSON fields into typed data.
     async fn shortcut_by_id(&self, id: &str) -> AppResult<ShortcutRecord> {
-        let row = sqlx::query_as::<_, ShortcutRow>("SELECT id,scope,server_id,name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at FROM command_shortcuts WHERE id=?")
+        let row = sqlx::query_as::<_, ShortcutRow>("SELECT id,scope,server_id,name,group_name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at FROM command_shortcuts WHERE id=?")
             .bind(id).fetch_optional(&self.pool).await.map_err(AppError::database)?.ok_or_else(|| AppError::new("SHORTCUT_NOT_FOUND", "shortcut", "快捷指令不存在"))?;
         row.into_record()
     }
@@ -211,12 +213,13 @@ impl LocalRepository {
         let now = Utc::now();
         for shortcut in default_shortcuts() {
             sqlx::query(
-                "INSERT OR IGNORE INTO command_shortcuts (id,scope,server_id,name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO command_shortcuts (id,scope,server_id,name,group_name,command_template,description,tags_json,enabled,builtin,usage_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             )
             .bind(shortcut.id)
             .bind("global")
             .bind(Option::<String>::None)
             .bind(shortcut.name)
+            .bind(shortcut.group_name)
             .bind(shortcut.command_template)
             .bind(shortcut.description)
             .bind(serde_json::to_string(shortcut.tags).map_err(AppError::database)?)
@@ -228,6 +231,13 @@ impl LocalRepository {
             .execute(&self.pool)
             .await
             .map_err(AppError::database)?;
+            sqlx::query("UPDATE command_shortcuts SET group_name=?, updated_at=? WHERE id=? AND builtin=1 AND group_name=''")
+                .bind(shortcut.group_name)
+                .bind(now)
+                .bind(shortcut.id)
+                .execute(&self.pool)
+                .await
+                .map_err(AppError::database)?;
         }
         Ok(())
     }
@@ -260,6 +270,11 @@ fn normalize_tags(values: Vec<String>) -> Vec<String> {
     tags
 }
 
+/// Trims a shortcut group label while keeping empty labels available for ungrouped commands.
+fn normalize_group_name(value: &str) -> String {
+    value.trim().to_string()
+}
+
 /// Stores the typed SQLite representation of a shortcut before decoding tags and scope.
 #[derive(Debug, FromRow)]
 struct ShortcutRow {
@@ -267,6 +282,7 @@ struct ShortcutRow {
     scope: String,
     server_id: Option<String>,
     name: String,
+    group_name: String,
     command_template: String,
     description: String,
     tags_json: String,
@@ -296,6 +312,7 @@ impl ShortcutRow {
             scope,
             server_id: self.server_id,
             name: self.name,
+            group_name: self.group_name,
             command_template: self.command_template,
             description: self.description,
             tags: serde_json::from_str(&self.tags_json).unwrap_or_default(),

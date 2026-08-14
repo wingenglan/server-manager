@@ -7,7 +7,7 @@
 ## 0.3.0 执行顺序（已完成代码与打包，真实验收待用户执行）
 
 1. 文档基线：已同步 HANDOFF、CURRENT_STATE、ARCHITECTURE、SECURITY、ACCEPTANCE 和本文件。
-2. 终端快捷指令：已完成 SQLite/typed IPC、默认指令、全局/服务器覆盖、标签、变量、匹配和 Tab 插入。
+2. 终端快捷指令：已完成 SQLite/typed IPC、默认指令分组、全局/服务器覆盖、标签、变量、匹配、Tab 插入；已补不遮挡输入区的建议框、单 shell 开关、建议隐藏操作和内存命令历史定位。
 3. 日志中心：已完成 system journal、systemd/Nginx、Docker/Compose、follow、暂停、搜索、下载和最大缓冲。
 4. 监控图表：已完成本地 24 小时/20,000 条滚动采样与 Overview 1h/6h/24h 趋势图。
 5. 任务持久化：已完成 `task_records`、启动中断标记、手动返回原模块重试入口和禁止自动重放。

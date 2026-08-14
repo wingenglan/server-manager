@@ -4,7 +4,7 @@
 
 ## 仓库与技术栈
 
-- 根目录：`agentless-server-manager`
+- 项目名称：`server-manager`（产品名：Relay）
 - Tauri 2 + Rust stable + Tokio
 - React 19 + TypeScript + Vite + React Router
 - TanStack Query、Zustand、Radix、Tailwind CSS 4
@@ -44,7 +44,7 @@
 - password/private key auth；SSH Agent 尚未实现（P1）。
 - 真实 PTY、raw byte Tauri Channel、resize、控制字符、UTF-8、ANSI、断开状态。
 - 多终端 tabs、新建/关闭/重命名、搜索、清屏、字号、滚动缓冲、copy/paste、多行粘贴提醒。
-- 0.3.0 快捷指令已接入：全局默认 + 单服务器覆盖、CRUD、标签、启用状态、`{{变量}}` 参数、前缀/分词匹配、最多 6 条建议、上下键/Tab/Esc 和管理入口；真实服务器验证待完成。
+- 0.3.0 快捷指令已接入：全局默认 + 单服务器覆盖、CRUD、分组、标签、启用状态、`{{变量}}` 参数、前缀/分词匹配、最多 6 条建议、上下键/Tab/Esc 和管理入口；建议框支持本次隐藏/本 shell 会话隐藏，每个 shell 可独立开关快捷指令；每个 shell 在内存中保留最近 200 条已提交命令，可点击定位输出或回到底部；真实服务器验证待完成。
 
 已知边界：
 
@@ -138,7 +138,7 @@
 
 ### 0.3.0 已实现能力（真实验收待完成）
 
-- 终端：快捷指令 registry、全局/服务器覆盖、默认命令、前缀/分词匹配、标签筛选、变量填写、Tab 插入和管理入口；快捷指令只插入，不自动执行。
+- 终端：快捷指令 registry、全局/服务器覆盖、默认命令分组、前缀/分词匹配、标签/分组筛选、变量填写、Tab 插入和管理入口；建议框不再遮挡底部输入区，支持本次/本 shell 隐藏、单 shell 开关和当前 shell 命令历史定位；快捷指令只插入，不自动执行。
 - 日志：system journal、systemd/Nginx、Docker/Compose 的统一查询、30 秒 follow、暂停、搜索、复制、下载、断线重连和有界缓冲；远程日志内容不落本地 SQLite。
 - 监控：本地 `metric_samples` 滚动历史、24 小时/每服务器 20,000 条限制、1h/6h/24h 趋势图和最多 500 点降采样。
 - 任务：`task_records` 持久化、启动恢复、interrupted 状态、状态/服务器筛选、手动返回原模块重试入口和清理；不自动重放危险任务。
@@ -170,10 +170,10 @@ git diff --check                  PASS
 ## Build/packaging 状态
 
 - 构建环境：Visual Studio Build Tools 2022 17.14.37，MSVC 14.44.35207，Windows SDK 10.0.26100.0，NASM 3.02，Rust 1.97.1，pnpm 10.28.2，Node 23.11.1。
-- `pnpm tauri build`：通过；主程序 `src-tauri/target/release/agentless-server-manager.exe` 已成功生成并 smoke launch。
-- NSIS 安装包：[agentless-server-manager_0.3.0_x64-setup.exe](../src-tauri/target/release/bundle/nsis/agentless-server-manager_0.3.0_x64-setup.exe)，9,572,734 bytes（9.13 MiB），SHA-256 `BC69CB7079582812031A4E0782CC9CF55148D420FBB108CD7F22F7201FD12CC1`。
-- MSI 安装包：[agentless-server-manager_0.3.0_x64_en-US.msi](../src-tauri/target/release/bundle/msi/agentless-server-manager_0.3.0_x64_en-US.msi)，12,402,688 bytes（11.83 MiB），SHA-256 `9CBB55AAB73B298382A6BC65EE7CE3ADC0DF77C66CAE816D08E64DBD9078270F`。
-- release 主程序：[agentless-server-manager.exe](../src-tauri/target/release/agentless-server-manager.exe)，28,370,944 bytes（27.06 MiB），SHA-256 `DDDBA7F3E0493DA6792C499EBB9E1DC76C99D273D519667B96E943FBD25679B7`。
+- `pnpm tauri build`：通过；主程序 `src-tauri/target/release/server-manager.exe` 已成功生成并 smoke launch 5 秒后正常关闭。
+- NSIS 安装包：[server-manager_0.3.0_x64-setup.exe](../src-tauri/target/release/bundle/nsis/server-manager_0.3.0_x64-setup.exe)，9,548,723 bytes（9.11 MiB），SHA-256 `FCF2CF25185E065CD3D4A482C5F318545415A2B13FDAABB329F8350E811DD2BC`。
+- MSI 安装包：[server-manager_0.3.0_x64_en-US.msi](../src-tauri/target/release/bundle/msi/server-manager_0.3.0_x64_en-US.msi)，12,406,784 bytes（11.83 MiB），SHA-256 `D7896962F46A185B187C3300163CC21292E35DFAD02E165518453556E6ED3D72`。
+- release 主程序：[server-manager.exe](../src-tauri/target/release/server-manager.exe)，28,383,744 bytes（27.07 MiB），SHA-256 `0E9A1DAB613821EBC344D313BA8EAFA1D763585FA5473BE41506C1CFB95FEB2C`。
 - 安装包验证：MSI/NSIS 已由 Tauri release bundle 生成，release exe 已隐藏启动 5 秒并按精确 PID 关闭；覆盖升级、安装后启动和卸载未在用户已有安装环境上执行，以避免删除或覆盖用户数据。
 
 ## 本次工作验证状态

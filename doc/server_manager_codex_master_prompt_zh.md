@@ -1,8 +1,8 @@
-# Agentless 多服务器桌面管理器 —— 第一阶段 Codex / AI Coding Agent 总控开发提示词
+# Server Manager 多服务器桌面管理器 —— 第一阶段 Codex / AI Coding Agent 总控开发提示词
 
 > **用途**：将本文件完整交给 Codex、Claude Code、Cursor Agent、GitHub Copilot Coding Agent 或其他具备代码库读写能力的 AI Coding Agent，作为第一阶段项目的最高优先级产品需求、架构约束、开发规范与验收标准。
 >
-> **项目代号**：Agentless Server Manager（后续可更名）
+> **项目名称**：Server Manager（产品名：Relay）
 >
 > **文档目标**：不允许 Coding Agent 因需求不清晰而自行缩减范围、用 Mock 替代真实能力、跳过安全处理、擅自改变产品形态，或把“可选功能”误当作“以后再做”。除明确列入“第一阶段非目标”的内容外，本文标记为 `MUST`、`必须`、`P0`、`P1` 的功能均应实际完成。
 
@@ -15,7 +15,7 @@
 必须遵循以下原则：
 
 1. **这是一个桌面端产品，不是 Web SaaS，不是服务器控制面板。**
-2. **远程 Linux 服务器不得安装本产品的 Agent、Daemon、Sidecar 或常驻采集程序。**
+2. **远程 Linux 服务器不得安装本产品的常驻服务、Daemon、Sidecar 或常驻采集程序。**
 3. 所有远程管理能力必须主要通过 **SSH + SFTP + 远程标准命令** 完成。
 4. 可以调用远程服务器上已经存在的 `docker`、`systemctl`、`nginx`、`ss`、`ps`、`journalctl` 等命令，但未经用户明确点击“安装”或“执行”不得擅自安装软件。
 5. 不得要求用户在每台服务器上部署额外服务才能使用基础功能。
@@ -34,7 +34,7 @@
 
 # 1. 产品定位
 
-开发一个 **零 Agent、多服务器、图形化 Linux 运维桌面客户端**。
+开发一个 **多服务器、图形化 Linux 运维桌面客户端**。
 
 用户只需在自己的 Windows/macOS/Linux 电脑安装一次本软件，然后添加多台 Linux 服务器 SSH 登录配置，即可完成：
 
@@ -50,7 +50,7 @@
 
 产品体验目标：
 
-> **Termius 的连接管理 + WinSCP/Finder/Explorer 的文件体验 + Cockpit/1Panel 的系统状态 + Docker Desktop 的 Docker 管理体验**，但远端不安装 Agent。
+> **Termius 的连接管理 + WinSCP/Finder/Explorer 的文件体验 + Cockpit/1Panel 的系统状态 + Docker Desktop 的 Docker 管理体验**，通过现有安全连接完成远程管理。
 
 ---
 
@@ -94,7 +94,7 @@
 
 - Electron；
 - 把整个 Rust 核心替换为 Node.js 后端；
-- 远端 Agent；
+- 远端常驻管理服务；
 - 要求用户自己运行一个本地 Web Server 才能打开 UI；
 - Redis、PostgreSQL 等额外本地服务依赖；
 - 把 SSH 密码存 LocalStorage；
@@ -922,7 +922,7 @@ Client max body size (optional)
 对 GUI 新建代理，优先写入本产品管理的独立配置文件，例如：
 
 ```text
-/etc/nginx/conf.d/agentless-manager/<safe-name>.conf
+/etc/nginx/conf.d/server-manager/<safe-name>.conf
 ```
 
 实际路径要根据当前 Nginx include 结构判断；如果该目录未被 include，不得假设生效，应让用户选择已 include 目录或提供明确的、安全的 include 变更流程。
@@ -1782,7 +1782,7 @@ Coding Agent 不要偷偷扩张这些需求导致核心功能做不完：
 - CMDB；
 - Prometheus 长期监控；
 - 30 天历史指标；
-- 强制服务器 Agent；
+- 强制服务器端常驻管理服务；
 - 自动 ACME/Let's Encrypt 证书签发；
 - 应用商店；
 - 完整 Ansible 替代品。
@@ -1940,7 +1940,7 @@ Coding Agent 不要偷偷扩张这些需求导致核心功能做不完：
 - Docker installed target；
 - Nginx reverse proxy target。
 
-可以用本地 VM/容器作为测试 target，但**产品自身仍不能要求生产服务器安装 Agent**。
+可以用本地 VM/容器作为测试 target，但**产品自身仍不能要求生产服务器安装常驻管理程序**。
 
 ## 28.4 手工 Acceptance Checklist
 
@@ -2176,7 +2176,7 @@ README 至少包含：
 以下决定视为默认架构，不要重复争论：
 
 1. **Tauri + React + Rust**，不是 Electron。
-2. **SSH/SFTP agentless**，不是每台服务器装管理面板。
+2. **SSH/SFTP 直连管理**，不在每台服务器安装管理面板。
 3. 系统监控是即时/短期状态，不做 Prometheus 长期时序数据库。
 4. 文件管理 SFTP-first，不用 `ls` 模拟文件系统。
 5. Docker 第一阶段 CLI-over-SSH，不暴露 daemon TCP API。

@@ -34,9 +34,10 @@ Tools、Nginx 和 Docker 当前也遵循同一 Rust boundary：工具 registry �
 
 ## 0.3.0 新增边界
 
-- 快捷指令只负责本地匹配、参数收集和安全插入终端，不负责自动执行；Enter 和危险操作确认仍由终端/现有 privileged runner 处理。
+- 快捷指令只负责本地匹配、参数收集和安全插入终端，不负责自动执行；Enter 和危险操作确认仍由终端/现有 privileged runner 处理。分组保存在 `command_shortcuts.group_name`；建议可按本次或当前 shell 会话隐藏，每个 shell 的开关只影响本地 UI。
+- 终端命令历史只保存在当前 `SessionTerminal` 内存状态，最多 200 条，用于定位 xterm scrollback 和回到底部；不写入 SQLite，也不跨应用重启恢复。
 - 日志中心由统一 `LogQuery`/`LogSnapshot`/流式事件 IPC 聚合 system journal、systemd、固定 Nginx access/error 路径和 Docker/Compose 适配器；follow 使用可取消 Channel、30 秒服务端上限和有界前端缓冲，不提供任意远程文件日志。
-- Overview 采样成功后写入本地短期 `metric_samples`，不会改变远程服务器，也不引入常驻 Agent。
+- Overview 采样成功后写入本地短期 `metric_samples`，不会改变远程服务器，也不依赖远程常驻服务。
 - 所有远程命令/流式长任务通过 `task_records` 保存状态、进度和可安全重试元数据；应用启动时只将 queued/running 标记为 `interrupted`，任务中心只导航回原模块供用户手动确认，禁止自动重放。
 
 ## 本地短期数据边界

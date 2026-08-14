@@ -7,9 +7,9 @@ export function ServerLandingPage() {
   const [open, setOpen] = useState(false);
   return (
     <section className="landing">
-      <div className="landing__eyebrow"><span /> 无代理运维</div>
+      <div className="landing__eyebrow"><span /> 服务器运维工作台</div>
       <h1>你的服务器，<br /><em>少一点距离。</em></h1>
-      <p>通过安全的 SSH 与 SFTP，在一个本地桌面工作台里管理 Linux、Nginx 和 Docker。远端无需安装任何 Agent。</p>
+      <p>通过安全的 SSH 与 SFTP，在一个本地桌面工作台里管理 Linux、Nginx 和 Docker。</p>
       <div className="landing__actions"><Button variant="primary" onClick={() => setOpen(true)}>连接第一台服务器 <ArrowRight size={16} /></Button><span>凭据由操作系统安全存储保护</span></div>
       <div className="capability-strip">
         <article><Network /><span><strong>实时状态</strong><small>系统、端口与进程</small></span></article>

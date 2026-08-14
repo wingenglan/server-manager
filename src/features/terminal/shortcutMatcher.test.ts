@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import { materializeShortcut, matchShortcuts, shortcutVariables } from "./shortcutMatcher";
 import type { ShortcutRecord } from "../../types/server";
 
+/** Builds a typed matcher fixture with a representative Docker group. */
 const shortcut = (commandTemplate: string, description = "") => ({
   id: commandTemplate,
   scope: "global",
   serverId: null,
   name: commandTemplate,
+  groupName: "Docker",
   commandTemplate,
   description,
   tags: ["docker"],

@@ -1,5 +1,5 @@
 {
-  "name": "agentless-server-manager",
+  "name": "server-manager",
   "private": true,
   "version": "0.3.0",
   "type": "module",

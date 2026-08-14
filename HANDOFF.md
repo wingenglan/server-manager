@@ -12,7 +12,7 @@
 
 ## 必读顺序
 
-1. [`doc/agentless_server_manager_codex_master_prompt_zh.md`](doc/agentless_server_manager_codex_master_prompt_zh.md) — 最高优先级完整产品需求，必须完整阅读。
+1. [`doc/server_manager_codex_master_prompt_zh.md`](doc/server_manager_codex_master_prompt_zh.md) — 最高优先级完整产品需求，必须完整阅读。
 2. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md) — 已完成代码、验证证据、未验证边界与已知问题。
 3. [`docs/NEXT_STEPS.md`](docs/NEXT_STEPS.md) — 推荐接手顺序和每一步的完成条件。
 4. [`docs/SECURITY.md`](docs/SECURITY.md) — secret、Host Key、sudo 和 WebView 安全边界。
@@ -73,9 +73,11 @@ Windows 需要 Rust stable MSVC、Visual Studio Build Tools 的“使用 C++ 的
 ## 0.3.0 执行边界
 
 - 快捷指令保存为全局默认或单服务器覆盖；Tab 只插入命令，Enter 仍由远端终端执行。
-- 支持 `{{变量}}` 参数填写；不记录完整终端输入、命令输出或快捷指令中的敏感凭据。
+- 快捷指令按 Docker、Systemd、网络、系统和自定义分组管理；建议框位于终端右上方，支持本次隐藏、本 shell 会话隐藏，每个 shell 标签可单独开关匹配。
+- 每个 shell 在内存中保存最近 200 条已提交命令，历史面板支持点击定位对应输出和滚动到底部；关闭 shell 后历史随会话销毁，不写入 SQLite。
+- 支持 `{{变量}}` 参数填写；命令历史只在当前 shell 内存展示，不持久化完整终端输入、命令输出或快捷指令中的敏感凭据。
 - 日志中心覆盖 system journal、systemd/Nginx、Docker/Compose；远程日志只流式展示，不默认持久化内容。
-- 监控历史只在本地保存 24 小时或每服务器最多 20,000 条采样，不安装远程 Agent。
+- 监控历史只在本地保存 24 小时或每服务器最多 20,000 条采样，采样通过现有连接按需完成。
 - 应用重启时把 queued/running 任务标为 `interrupted`，只允许用户手动重试，不自动重放危险任务。
 
 ## 下一条推荐任务

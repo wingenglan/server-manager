@@ -178,6 +178,7 @@ export interface ShortcutRecord {
   scope: ShortcutScope;
   serverId: string | null;
   name: string;
+  groupName: string;
   commandTemplate: string;
   description: string;
   tags: string[];
@@ -193,6 +194,7 @@ export interface SaveShortcutInput {
   scope: ShortcutScope;
   serverId?: string;
   name: string;
+  groupName: string;
   commandTemplate: string;
   description: string;
   tags: string[];
